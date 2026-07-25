@@ -1,0 +1,8 @@
+[package]
+name = "my-c-compiler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.4", features = ["derive"] }
+logos = "0.16.1"
