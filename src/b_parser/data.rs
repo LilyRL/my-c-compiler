@@ -20,6 +20,16 @@ pub enum Statement {
 #[derive(Debug)]
 pub enum Expression {
     Constant(Constant),
+    Unary {
+        operator: UnaryOperator,
+        expr: Box<Expression>,
+    },
+}
+
+#[derive(Debug)]
+pub enum UnaryOperator {
+    Complement,
+    Negate,
 }
 
 #[derive(Debug)]
@@ -60,6 +70,7 @@ impl Expression {
     pub fn lower(self) -> codegen::Operand {
         match self {
             Self::Constant(c) => c.lower(),
+            _ => todo!(),
         }
     }
 }

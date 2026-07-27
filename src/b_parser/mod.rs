@@ -19,6 +19,10 @@ pub enum Error {
         found: Token,
         span: Range<usize>,
     },
+    UnexpectedToken {
+        found: Token,
+        span: Range<usize>,
+    },
 }
 
 impl Parser {
@@ -66,7 +70,37 @@ impl Parser {
     }
 
     pub fn expression(&mut self) -> Option<Expression> {
-        Some(Expression::Constant(self.constant()?))
+        match self.next()? {
+            Token::OpenParen => {
+                let expr = self.expression()?;
+                self.consume(Token::CloseParen)?;
+                Some(expr)
+            }
+            Token::ConstantInt => Some(Expression::Constant(self.constant()?)),
+            Token::Hyphen => {
+                let expr = self.expression()?;
+                Some(Expression::Unary {
+                    operator: UnaryOperator::Negate,
+                    expr: Box::new(expr),
+                })
+            }
+            Token::Tilde => {
+                let expr = self.expression()?;
+                Some(Expression::Unary {
+                    operator: UnaryOperator::Complement,
+                    expr: Box::new(expr),
+                })
+            }
+            _ => {
+                let current = self.current_spanned();
+                self.errors.push(Error::UnexpectedToken {
+                    found: self.current()?.clone(),
+                    span: current?.span.clone(),
+                });
+
+                None
+            }
+        }
     }
 
     pub fn constant(&mut self) -> Option<Constant> {
@@ -74,8 +108,6 @@ impl Parser {
     }
 
     pub fn int(&mut self) -> Option<i32> {
-        self.consume(Token::ConstantInt)?;
-
         match self.current_spanned()? {
             SpannedToken {
                 token: Token::ConstantInt,
@@ -113,6 +145,10 @@ impl Parser {
             self.i += 1;
             Some(&token.token)
         } else {
+            self.errors.push(Error::UnexpectedToken {
+                found: Token::EndOfInput,
+                span: self.source.len()..self.source.len(),
+            });
             None
         }
     }

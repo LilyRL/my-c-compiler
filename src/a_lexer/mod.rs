@@ -2,7 +2,6 @@ use std::ops::Range;
 
 use logos::Logos;
 
-
 #[derive(Logos, Debug, PartialEq, Copy, Clone)]
 #[logos(skip r"[ \t\n]+")]
 #[logos(error = String)]
@@ -27,6 +26,12 @@ pub enum Token {
     CloseBrace,
     #[token(";")]
     Semicolon,
+    #[token("~")]
+    Tilde,
+    #[token("-")]
+    Hyphen,
+    #[token("--")]
+    Decrement,
     EndOfInput,
 }
 
