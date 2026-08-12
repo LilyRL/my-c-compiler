@@ -1,7 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::{Command, ExitCode, Stdio},
 };
 
 use clap::Parser;
@@ -38,6 +38,10 @@ struct Args {
     #[arg(long, default_value_t = false)]
     parse: bool,
 
+    /// Stop after creating IR and print it out
+    #[arg(long, default_value_t = false)]
+    tacky: bool,
+
     /// Stop after codegen without emitting assembly
     #[arg(long, default_value_t = false)]
     codegen: bool,
@@ -46,7 +50,7 @@ struct Args {
     #[arg(short = 'S', default_value_t = false)]
     dont_assemble: bool,
 
-    /// Keep intermediate .i and .s files
+    /// Keep intermediate .s files
     #[arg(long, default_value_t = false)]
     keep_intermediates: bool,
 }
@@ -54,7 +58,6 @@ struct Args {
 #[derive(Debug)]
 struct Paths {
     input: PathBuf,
-    preprocessed: PathBuf,
     assembly: PathBuf,
     output: PathBuf,
 }
@@ -63,10 +66,7 @@ impl Paths {
     fn new(args: &Args) -> Self {
         let input = args.input_path.clone();
         let stem = input.file_stem().expect("Input file has no valid filename");
-
-        let preprocessed = input.with_extension("i");
         let assembly = input.with_extension("s");
-
         let output = args
             .output_path
             .clone()
@@ -74,47 +74,37 @@ impl Paths {
 
         Self {
             input,
-            preprocessed,
             assembly,
             output,
         }
     }
 }
 
-struct TempFileGuard {
-    path: PathBuf,
-    keep: bool,
-}
-
-impl TempFileGuard {
-    fn new(path: PathBuf, keep: bool) -> Self {
-        Self { path, keep }
-    }
-}
-
-impl Drop for TempFileGuard {
-    fn drop(&mut self) {
-        if !self.keep && self.path.exists() {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
-}
-
 fn compile_pipeline(source: &str, args: &Args) -> Result<Option<String>, String> {
     let tokens = lex(source).ok_or("Lexing failed")?;
-    dbg!(&tokens);
     if args.lex {
+        println!("{:#?}", tokens);
         return Ok(None);
     }
 
     let program = parse(source.to_string(), tokens).ok_or("Parsing failed")?;
-    dbg!(&program);
     if args.parse {
+        println!("{:#?}", program);
         return Ok(None);
     }
 
-    let asm_program = program.lower();
-    dbg!(&asm_program);
+    let tacky_program = program.lower();
+    if args.tacky {
+        println!("{tacky_program}");
+        return Ok(None);
+    }
+
+    let mut asm_program = tacky_program.lower();
+    codegen::transform(&mut asm_program);
+
+    if args.codegen {
+        return Ok(None);
+    }
 
     Ok(Some(asm_program.format()))
 }
@@ -122,56 +112,40 @@ fn compile_pipeline(source: &str, args: &Args) -> Result<Option<String>, String>
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let paths = Paths::new(&args);
-    dbg!(&paths);
 
-    let preproc_status = Command::new("gcc")
-        .args([
-            "-E",
-            "-P",
-            paths.input.to_str().ok_or("Invalid input path string")?,
-            "-o",
-            paths
-                .preprocessed
-                .to_str()
-                .ok_or("Invalid preprocessed path string")?,
-        ])
-        .status()?;
+    // Run preprocessor directly to stdout to avoid temporary .i files
+    let preproc = Command::new("gcc")
+        .args(["-E", "-P"])
+        .arg(&paths.input)
+        .stdout(Stdio::piped())
+        .output()?;
 
-    if !preproc_status.success() {
+    if !preproc.status.success() {
         return Err("Preprocessing step (gcc -E) failed".into());
     }
 
-    let _i_guard = TempFileGuard::new(paths.preprocessed.clone(), args.keep_intermediates);
+    let preprocessed_source = String::from_utf8(preproc.stdout)?;
 
-    let preprocessed_source = fs::read_to_string(&paths.preprocessed)?;
-
-    if args.codegen {
+    let Some(asm_output) = compile_pipeline(&preprocessed_source, &args)? else {
         return Ok(());
-    }
-
-    let asm_output = match compile_pipeline(&preprocessed_source, &args)? {
-        Some(asm) => asm,
-        None => return Ok(()),
     };
 
     fs::write(&paths.assembly, asm_output)?;
-
-    let _s_guard = TempFileGuard::new(paths.assembly.clone(), args.keep_intermediates);
 
     if args.dont_assemble {
         return Ok(());
     }
 
     let assemble_status = Command::new("gcc")
-        .args([
-            paths
-                .assembly
-                .to_str()
-                .ok_or("Invalid assembly path string")?,
-            "-o",
-            paths.output.to_str().ok_or("Invalid output path string")?,
-        ])
+        .arg(&paths.assembly)
+        .args(["-o"])
+        .arg(&paths.output)
         .status()?;
+
+    // Clean up .s intermediate unless flagged to keep
+    if !args.keep_intermediates {
+        let _ = fs::remove_file(&paths.assembly);
+    }
 
     if !assemble_status.success() {
         return Err("Assembly/linking step (gcc) failed".into());

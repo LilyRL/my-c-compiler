@@ -1,4 +1,7 @@
-use crate::codegen;
+use crate::{
+    c_ir::{Instruction, Value},
+    ir,
+};
 
 #[derive(Debug)]
 pub struct Program(pub FunctionDefinition);
@@ -9,8 +12,14 @@ pub struct FunctionDefinition {
     pub block: Statement,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Identifier(pub String);
+
+impl Identifier {
+    pub fn rand() -> Self {
+        Self((0..6).map(|_| rand::random_range('a'..'z')).collect())
+    }
+}
 
 #[derive(Debug)]
 pub enum Statement {
@@ -24,12 +33,61 @@ pub enum Expression {
         operator: UnaryOperator,
         expr: Box<Expression>,
     },
+    Binary {
+        operator: BinaryOperator,
+        lhs: Box<Expression>,
+        rhs: Box<Expression>,
+    },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum UnaryOperator {
     Complement,
     Negate,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BinaryOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
+}
+
+impl BinaryOperator {
+    pub fn precedence(self) -> u32 {
+        match self {
+            Self::Add | Self::Subtract => 45,
+            Self::Multiply | Self::Divide | Self::Remainder => 50,
+        }
+    }
+
+    pub fn to_str(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::Remainder => "%",
+        }
+    }
+
+    pub fn lower(self) -> crate::codegen::BinaryOperator {
+        match self {
+            Self::Add => crate::codegen::BinaryOperator::Add,
+            Self::Subtract => crate::codegen::BinaryOperator::Sub,
+            Self::Multiply => crate::codegen::BinaryOperator::Mult,
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn not_divide_or_remainder(self) -> bool {
+        match self {
+            Self::Divide | Self::Remainder => false,
+            _ => true,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -38,47 +96,73 @@ pub enum Constant {
 }
 
 impl Program {
-    pub fn lower(self) -> codegen::Program {
-        codegen::Program(self.0.lower())
+    pub fn lower(self) -> ir::Program {
+        ir::Program(self.0.lower())
     }
 }
 
 impl FunctionDefinition {
-    pub fn lower(self) -> codegen::FunctionDefinition {
-        codegen::FunctionDefinition {
+    pub fn lower(self) -> ir::FunctionDefinition {
+        let mut instructions = Vec::new();
+
+        for statement in [self.block] {
+            statement.lower(&mut instructions);
+        }
+
+        ir::FunctionDefinition {
             name: self.name,
-            instructions: self.block.lower(),
+            body: instructions,
         }
     }
 }
 
 impl Statement {
-    pub fn lower(self) -> Vec<codegen::Instruction> {
+    pub fn lower(self, instructions: &mut Vec<Instruction>) {
         match self {
-            Self::Return(c) => vec![
-                codegen::Instruction::Mov {
-                    src: c.lower(),
-                    dst: codegen::Operand::Register,
-                },
-                codegen::Instruction::Ret,
-            ],
+            Self::Return(c) => {
+                let dst = c.lower(instructions);
+                instructions.push(Instruction::Return(dst));
+            }
         }
     }
 }
 
 impl Expression {
-    pub fn lower(self) -> codegen::Operand {
+    pub fn lower(self, instructions: &mut Vec<Instruction>) -> Value {
         match self {
             Self::Constant(c) => c.lower(),
-            _ => todo!(),
+            Self::Unary { operator, expr } => {
+                let src = expr.lower(instructions);
+                let dst = Value::Var(Identifier::rand());
+
+                instructions.push(Instruction::Unary {
+                    operator,
+                    src,
+                    dst: dst.clone(),
+                });
+                dst
+            }
+            Self::Binary { operator, lhs, rhs } => {
+                let lhs = lhs.lower(instructions);
+                let rhs = rhs.lower(instructions);
+                let dst = Value::Var(Identifier::rand());
+
+                instructions.push(Instruction::Binary {
+                    operator,
+                    lhs,
+                    rhs,
+                    dst: dst.clone(),
+                });
+                return dst;
+            }
         }
     }
 }
 
 impl Constant {
-    pub fn lower(self) -> codegen::Operand {
+    pub fn lower(self) -> ir::Value {
         match self {
-            Constant::Int(i) => codegen::Operand::Imm(i),
+            Constant::Int(i) => ir::Value::Constant(i),
         }
     }
 }

@@ -32,6 +32,14 @@ pub enum Token {
     Hyphen,
     #[token("--")]
     Decrement,
+    #[token("+")]
+    Plus,
+    #[token("*")]
+    Asterisk,
+    #[token("/")]
+    Slash,
+    #[token("%")]
+    Percent,
     EndOfInput,
 }
 

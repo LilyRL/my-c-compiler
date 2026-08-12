@@ -63,29 +63,51 @@ impl Parser {
 
     pub fn statement(&mut self) -> Option<Statement> {
         self.consume(Token::Return)?;
-        let return_val = self.expression()?;
+        let return_val = self.expression(0)?;
         self.consume(Token::Semicolon)?;
 
         Some(Statement::Return(return_val))
     }
 
-    pub fn expression(&mut self) -> Option<Expression> {
+    pub fn expression(&mut self, min_precedence: u32) -> Option<Expression> {
+        let mut lhs = self.factor()?;
+
+        while let Some(operator) = self.peek_binary_operator() {
+            if operator.precedence() < min_precedence {
+                break;
+            }
+
+            self.next()?;
+
+            let rhs = self.expression(operator.precedence() + 1)?;
+
+            lhs = Expression::Binary {
+                operator,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            };
+        }
+
+        Some(lhs)
+    }
+
+    pub fn factor(&mut self) -> Option<Expression> {
         match self.next()? {
             Token::OpenParen => {
-                let expr = self.expression()?;
+                let expr = self.expression(0)?;
                 self.consume(Token::CloseParen)?;
                 Some(expr)
             }
             Token::ConstantInt => Some(Expression::Constant(self.constant()?)),
             Token::Hyphen => {
-                let expr = self.expression()?;
+                let expr = self.factor()?;
                 Some(Expression::Unary {
                     operator: UnaryOperator::Negate,
                     expr: Box::new(expr),
                 })
             }
             Token::Tilde => {
-                let expr = self.expression()?;
+                let expr = self.factor()?;
                 Some(Expression::Unary {
                     operator: UnaryOperator::Complement,
                     expr: Box::new(expr),
@@ -220,6 +242,11 @@ impl Parser {
             None
         }
     }
+
+    pub fn peek_binary_operator(&self) -> Option<BinaryOperator> {
+        let token = self.peek()?;
+        binary_operator(*token)
+    }
 }
 
 pub fn parse(source: String, tokens: Vec<SpannedToken>) -> Option<Program> {
@@ -235,4 +262,15 @@ pub fn parse(source: String, tokens: Vec<SpannedToken>) -> Option<Program> {
     }
 
     program
+}
+
+fn binary_operator(token: Token) -> Option<BinaryOperator> {
+    match token {
+        Token::Plus => Some(BinaryOperator::Add),
+        Token::Hyphen => Some(BinaryOperator::Subtract),
+        Token::Asterisk => Some(BinaryOperator::Multiply),
+        Token::Slash => Some(BinaryOperator::Divide),
+        Token::Percent => Some(BinaryOperator::Remainder),
+        _ => None,
+    }
 }
