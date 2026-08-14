@@ -78,7 +78,7 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
                 i += 1;
             }
             Instruction::Binary { operator, src, dst }
-                if operator.is_add_or_sub() && src.is_stack() && dst.is_stack() =>
+                if operator.cant_have_double_memory() && src.is_stack() && dst.is_stack() =>
             {
                 function.instructions[i] = Instruction::Binary {
                     operator,
@@ -94,6 +94,24 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
                 );
                 i += 1;
             }
+            Instruction::Binary { operator, src, dst } if operator.is_shift() => {
+                // cnt must be in %ecx
+                if src.is_stack() {
+                    function.instructions[i] = Instruction::Binary {
+                        operator,
+                        src: Operand::Reg(Register::Cx),
+                        dst,
+                    };
+                    function.instructions.insert(
+                        i,
+                        Instruction::Mov {
+                            src,
+                            dst: Operand::Reg(Register::Cx),
+                        },
+                    );
+                    i += 1;
+                }
+            }
             _ => (),
         }
 
@@ -106,9 +124,7 @@ pub fn rewrite_invalid_imul_memory_dst(function: &mut FunctionDefinition) {
 
     while i < function.instructions.len() {
         match function.instructions[i].clone() {
-            Instruction::Binary { operator, src, dst }
-                if matches!(operator, BinaryOperator::Mult) =>
-            {
+            Instruction::Binary { operator, src, dst } if operator.is_mult() => {
                 if dst.is_stack() {
                     function.instructions[i] = Instruction::Mov {
                         src: dst.clone(),

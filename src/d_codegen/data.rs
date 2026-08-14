@@ -1,4 +1,4 @@
-use crate::{b_parser::UnaryOperator, parser::Identifier};
+use crate::parser::Identifier;
 
 #[derive(Debug)]
 pub struct Program(pub FunctionDefinition);
@@ -7,19 +7,6 @@ pub struct Program(pub FunctionDefinition);
 pub struct FunctionDefinition {
     pub name: Identifier,
     pub instructions: Vec<Instruction>,
-}
-
-#[derive(Debug, Clone)]
-pub enum BinaryOperator {
-    Add,
-    Sub,
-    Mult,
-}
-
-impl BinaryOperator {
-    pub fn is_add_or_sub(&self) -> bool {
-        matches!(self, Self::Add | Self::Sub)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -47,8 +34,36 @@ pub enum Instruction {
 pub enum Register {
     Ax,
     Dx,
+    Cx,
     R10,
     R11,
+}
+
+#[derive(Debug, Clone)]
+pub enum BinaryOperator {
+    Add,
+    Sub,
+    Mul,
+    LeftShift,
+    RightShift,
+    LogicalLeftShift,
+    LogicalRightShift,
+    BitwiseAnd,
+    BitwiseXor,
+    BitwiseOr,
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterEqual,
+    LessThan,
+    LessEqual,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryOperator {
+    BitwiseNot,
+    Negate,
+    Not,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +72,63 @@ pub enum Operand {
     Reg(Register),
     Pseudo(Identifier),
     Stack(i32),
+}
+
+impl BinaryOperator {
+    pub fn op_str(&self) -> &'static str {
+        match self {
+            Self::Add => "addl",
+            Self::Sub => "subl",
+            Self::Mul => "imull",
+            Self::LeftShift => "sall",
+            Self::RightShift => "sarl",
+            Self::LogicalLeftShift => "shll",
+            Self::LogicalRightShift => "shrl",
+            Self::BitwiseAnd => "andl",
+            Self::BitwiseXor => "xorl",
+            Self::BitwiseOr => "orl",
+            _ => todo!(),
+        }
+    }
+
+    pub fn src_size(&self) -> u32 {
+        match self {
+            Self::Add
+            | Self::Sub
+            | Self::Mul
+            | Self::BitwiseAnd
+            | Self::BitwiseXor
+            | Self::BitwiseOr => 4,
+            Self::LeftShift
+            | Self::RightShift
+            | Self::LogicalLeftShift
+            | Self::LogicalRightShift => 1,
+            _ => todo!(),
+        }
+    }
+
+    pub fn dst_size(&self) -> u32 {
+        4
+    }
+
+    pub fn cant_have_double_memory(&self) -> bool {
+        matches!(
+            self,
+            Self::Add | Self::Sub | Self::BitwiseAnd | Self::BitwiseXor | Self::BitwiseOr
+        )
+    }
+
+    pub fn is_shift(&self) -> bool {
+        matches!(self, Self::LeftShift | Self::RightShift)
+    }
+
+    /// Returns `true` if the codegen binary operator is [`Mult`].
+    ///
+    /// [`Mult`]: BinaryOperator::Mult
+    #[must_use]
+    pub fn is_mult(&self) -> bool {
+        matches!(self, Self::Mul)
+    }
 }
 
 impl Program {
@@ -105,7 +177,7 @@ impl Instruction {
     pub fn format(&self, lines: &mut Vec<String>) {
         match self {
             Self::Mov { src, dst } => {
-                lines.push(format!("movl {}, {}", src.format(), dst.format()))
+                lines.push(format!("movl {}, {}", src.format(4), dst.format(4)))
             }
             Self::Ret => {
                 lines.push("movq %rbp, %rsp".to_string());
@@ -113,20 +185,22 @@ impl Instruction {
                 lines.push("ret".to_string());
             }
             Self::AllocateStack(size) => lines.push(format!("subq ${size}, %rsp")),
-            Self::Unary { operator, operand } => lines.push(match operator {
-                UnaryOperator::Negate => format!("negl {}", operand.format()),
-                UnaryOperator::Complement => format!("notl {}", operand.format()),
-            }),
+            Self::Unary { operator, operand } => {
+                lines.push(format!("{} {}", operator.op_str(), operand.format(4)))
+            }
             Self::Binary { operator, src, dst } => {
-                let op_str = match operator {
-                    BinaryOperator::Add => "addl",
-                    BinaryOperator::Sub => "subl",
-                    BinaryOperator::Mult => "imull",
-                };
-                lines.push(format!("{op_str} {}, {}", src.format(), dst.format()))
+                let op_str = operator.op_str();
+                let src_size = operator.src_size();
+                let dst_size = operator.dst_size();
+
+                lines.push(format!(
+                    "{op_str} {}, {}",
+                    src.format(src_size),
+                    dst.format(dst_size)
+                ))
             }
             Self::Idiv(operand) => {
-                lines.push(format!("idivl {}", operand.format()));
+                lines.push(format!("idivl {}", operand.format(4)));
             }
             Self::Cdq => {
                 lines.push("cdq".to_string());
@@ -136,14 +210,31 @@ impl Instruction {
 }
 
 impl Operand {
-    pub fn format(&self) -> String {
+    pub fn format(&self, size: u32) -> String {
         match self {
             Self::Imm(i) => format!("${i}"),
-            Self::Reg(register) => match register {
-                Register::Ax => "%eax".to_string(),
-                Register::Dx => "%edx".to_string(),
-                Register::R10 => "%r10d".to_string(),
-                Register::R11 => "%r11d".to_string(),
+            Self::Reg(register) => match (register, size) {
+                (Register::Ax, 1) => "%al".to_string(),
+                (Register::Ax, 2) => "%ax".to_string(),
+                (Register::Ax, 4) => "%eax".to_string(),
+                (Register::Ax, 8) => "%rax".to_string(),
+
+                (Register::Dx, 1) => "%dl".to_string(),
+                (Register::Dx, 2) => "%dx".to_string(),
+                (Register::Dx, 4) => "%edx".to_string(),
+                (Register::Dx, 8) => "%rdx".to_string(),
+
+                (Register::Cx, 1) => "%cl".to_string(),
+                (Register::Cx, 2) => "%cx".to_string(),
+                (Register::Cx, 4) => "%ecx".to_string(),
+                (Register::Cx, 8) => "%rcx".to_string(),
+
+                (Register::R10, 4) => "%r10d".to_string(),
+                (Register::R10, 8) => "%r10".to_string(),
+                (Register::R11, 4) => "%r11d".to_string(),
+                (Register::R11, 8) => "%r11".to_string(),
+
+                _ => unimplemented!(),
             },
             Self::Stack(offset) => format!("{}(%rbp)", offset),
             Self::Pseudo(_) => unimplemented!(),
@@ -156,5 +247,15 @@ impl Operand {
     #[must_use]
     pub fn is_stack(&self) -> bool {
         matches!(self, Self::Stack(..))
+    }
+}
+
+impl UnaryOperator {
+    pub fn op_str(&self) -> &'static str {
+        match self {
+            Self::BitwiseNot => "notl",
+            Self::Negate => "negl",
+            Self::Not => unimplemented!(),
+        }
     }
 }

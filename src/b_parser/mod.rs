@@ -109,7 +109,14 @@ impl Parser {
             Token::Tilde => {
                 let expr = self.factor()?;
                 Some(Expression::Unary {
-                    operator: UnaryOperator::Complement,
+                    operator: UnaryOperator::BitwiseNot,
+                    expr: Box::new(expr),
+                })
+            }
+            Token::Not => {
+                let expr = self.factor()?;
+                Some(Expression::Unary {
+                    operator: UnaryOperator::Not,
                     expr: Box::new(expr),
                 })
             }
@@ -245,7 +252,7 @@ impl Parser {
 
     pub fn peek_binary_operator(&self) -> Option<BinaryOperator> {
         let token = self.peek()?;
-        binary_operator(*token)
+        BinaryOperator::from_token(*token)
     }
 }
 
@@ -262,15 +269,4 @@ pub fn parse(source: String, tokens: Vec<SpannedToken>) -> Option<Program> {
     }
 
     program
-}
-
-fn binary_operator(token: Token) -> Option<BinaryOperator> {
-    match token {
-        Token::Plus => Some(BinaryOperator::Add),
-        Token::Hyphen => Some(BinaryOperator::Subtract),
-        Token::Asterisk => Some(BinaryOperator::Multiply),
-        Token::Slash => Some(BinaryOperator::Divide),
-        Token::Percent => Some(BinaryOperator::Remainder),
-        _ => None,
-    }
 }

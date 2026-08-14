@@ -40,6 +40,38 @@ pub enum Token {
     Slash,
     #[token("%")]
     Percent,
+    #[token("&")]
+    Ampersand,
+    #[token("^")]
+    Caret,
+    #[token("|")]
+    Pipe,
+    #[token("<<")]
+    LeftShift,
+    #[token(">>")]
+    RightShift,
+    #[token("<<<")]
+    LogicalLeftShift,
+    #[token(">>>")]
+    LogicalRightShift,
+    #[token("!")]
+    Not,
+    #[token("&&")]
+    LogicalAnd,
+    #[token("||")]
+    LogicalOr,
+    #[token("==")]
+    Equal,
+    #[token("!=")]
+    NotEqual,
+    #[token("<")]
+    LessThan,
+    #[token("<=")]
+    LessEqual,
+    #[token(">")]
+    GreaterThan,
+    #[token(">=")]
+    GreaterEqual,
     EndOfInput,
 }
 
