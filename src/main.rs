@@ -15,6 +15,9 @@ mod a_lexer;
 use b_parser as parser;
 mod b_parser;
 
+use bb_analysis as analysis;
+mod bb_analysis;
+
 use c_ir as ir;
 mod c_ir;
 
@@ -38,6 +41,10 @@ struct Args {
     #[arg(long, default_value_t = false)]
     parse: bool,
 
+    /// Stop after semantic analysis
+    #[arg(long, default_value_t = false)]
+    validate: bool,
+
     /// Stop after creating IR and print it out
     #[arg(long, default_value_t = false)]
     tacky: bool,
@@ -60,6 +67,9 @@ struct Paths {
     input: PathBuf,
     assembly: PathBuf,
     output: PathBuf,
+    ir: PathBuf,
+    parsed_ast: PathBuf,
+    tokens: PathBuf,
 }
 
 impl Paths {
@@ -67,6 +77,9 @@ impl Paths {
         let input = args.input_path.clone();
         let stem = input.file_stem().expect("Input file has no valid filename");
         let assembly = input.with_extension("s");
+        let ir = input.with_extension("ir");
+        let parsed_ast = input.with_extension("ast");
+        let tokens = input.with_extension("tokens");
         let output = args
             .output_path
             .clone()
@@ -76,20 +89,39 @@ impl Paths {
             input,
             assembly,
             output,
+            ir,
+            parsed_ast,
+            tokens,
         }
     }
 }
 
-fn compile_pipeline(source: &str, args: &Args) -> Result<Option<String>, String> {
+fn compile_pipeline(source: &str, args: &Args, paths: &Paths) -> Result<Option<String>, String> {
     let tokens = lex(source).ok_or("Lexing failed")?;
     if args.lex {
         println!("{:#?}", tokens);
         return Ok(None);
     }
 
-    let program = parse(source.to_string(), tokens).ok_or("Parsing failed")?;
+    if args.keep_intermediates {
+        let _ = fs::write(&paths.tokens, format!("{:#?}", tokens));
+    }
+
+    let mut program = parse(source.to_string(), tokens).ok_or("Parsing failed")?;
     if args.parse {
-        println!("{:#?}", program);
+        println!("{}", program);
+        return Ok(None);
+    }
+
+    if args.keep_intermediates {
+        let _ = fs::write(&paths.parsed_ast, format!("{program}"));
+    }
+
+    let analysis_result = analysis::validate_program(&mut program);
+    if let Err(e) = analysis_result {
+        return Err(format!("Semantic analysis failed: {:?}", e));
+    }
+    if args.validate {
         return Ok(None);
     }
 
@@ -99,10 +131,16 @@ fn compile_pipeline(source: &str, args: &Args) -> Result<Option<String>, String>
         return Ok(None);
     }
 
+    if args.keep_intermediates {
+        let _ = fs::write(&paths.ir, format!("{tacky_program}"));
+    }
+
     let mut asm_program = tacky_program.lower();
     codegen::transform(&mut asm_program);
 
     if args.codegen {
+        println!("{:#?}", asm_program);
+
         return Ok(None);
     }
 
@@ -126,7 +164,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let preprocessed_source = String::from_utf8(preproc.stdout)?;
 
-    let Some(asm_output) = compile_pipeline(&preprocessed_source, &args)? else {
+    let Some(asm_output) = compile_pipeline(&preprocessed_source, &args, &paths)? else {
         return Ok(());
     };
 

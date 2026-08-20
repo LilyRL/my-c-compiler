@@ -1,8 +1,9 @@
 use std::ops::Range;
 
 use logos::Logos;
+use strum::EnumIs;
 
-#[derive(Logos, Debug, PartialEq, Copy, Clone)]
+#[derive(Logos, Debug, PartialEq, Copy, Clone, EnumIs)]
 #[logos(skip r"[ \t\n]+")]
 #[logos(error = String)]
 pub enum Token {
@@ -30,8 +31,6 @@ pub enum Token {
     Tilde,
     #[token("-")]
     Hyphen,
-    #[token("--")]
-    Decrement,
     #[token("+")]
     Plus,
     #[token("*")]
@@ -50,10 +49,6 @@ pub enum Token {
     LeftShift,
     #[token(">>")]
     RightShift,
-    #[token("<<<")]
-    LogicalLeftShift,
-    #[token(">>>")]
-    LogicalRightShift,
     #[token("!")]
     Not,
     #[token("&&")]
@@ -72,6 +67,32 @@ pub enum Token {
     GreaterThan,
     #[token(">=")]
     GreaterEqual,
+    #[token("=")]
+    Assign,
+    #[token("+=")]
+    AddAssign,
+    #[token("-=")]
+    SubtractAssign,
+    #[token("*=")]
+    MultiplyAssign,
+    #[token("/=")]
+    DivideAssign,
+    #[token("%=")]
+    RemainderAssign,
+    #[token("&=")]
+    BitwiseAndAssign,
+    #[token("^=")]
+    BitwiseXorAssign,
+    #[token("|=")]
+    BitwiseOrAssign,
+    #[token(">>=")]
+    RightShiftAssign,
+    #[token("<<=")]
+    LeftShiftAssign,
+    #[token("++")]
+    Increment,
+    #[token("--")]
+    Decrement,
     EndOfInput,
 }
 

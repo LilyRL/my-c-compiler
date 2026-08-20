@@ -53,20 +53,64 @@ impl Parser {
         Some(FunctionDefinition { name, block })
     }
 
-    pub fn block(&mut self) -> Option<Statement> {
+    pub fn block(&mut self) -> Option<Block> {
         self.consume(Token::OpenBrace)?;
-        let stmt = self.statement()?;
+        let statements = self.block_items()?;
         self.consume(Token::CloseBrace)?;
 
-        Some(stmt)
+        Some(statements)
+    }
+
+    pub fn block_items(&mut self) -> Option<Vec<BlockItem>> {
+        let mut items = vec![];
+
+        while !self.peek()?.is_close_brace() {
+            items.push(self.block_item()?);
+        }
+
+        Some(items)
+    }
+
+    pub fn block_item(&mut self) -> Option<BlockItem> {
+        if self.peek()?.is_int() {
+            self.declaration().map(|d| BlockItem::Decl(d))
+        } else {
+            self.statement().map(|s| BlockItem::Stmt(s))
+        }
+    }
+
+    pub fn declaration(&mut self) -> Option<Declaration> {
+        self.consume(Token::Int)?;
+        let name = self.ident()?;
+        let mut init = None;
+
+        if self.consume_if_present(Token::Assign).is_some() {
+            init = Some(self.expression(0)?);
+        }
+
+        self.consume(Token::Semicolon)?;
+
+        Some(Declaration { name, init })
     }
 
     pub fn statement(&mut self) -> Option<Statement> {
-        self.consume(Token::Return)?;
-        let return_val = self.expression(0)?;
-        self.consume(Token::Semicolon)?;
-
-        Some(Statement::Return(return_val))
+        match self.peek()? {
+            Token::Return => {
+                self.next()?;
+                let return_val = self.expression(0)?;
+                self.consume(Token::Semicolon)?;
+                Some(Statement::Return(return_val))
+            }
+            Token::Semicolon => {
+                self.next()?;
+                Some(Statement::Null)
+            }
+            _ => {
+                let expr = self.expression(0)?;
+                self.consume(Token::Semicolon)?;
+                Some(Statement::Expression(expr))
+            }
+        }
     }
 
     pub fn expression(&mut self, min_precedence: u32) -> Option<Expression> {
@@ -79,13 +123,25 @@ impl Parser {
 
             self.next()?;
 
-            let rhs = self.expression(operator.precedence() + 1)?;
+            if operator.is_compound_assign() {
+                let rhs = self.expression(operator.precedence())?;
+                lhs = Expression::CompoundAssign {
+                    operator,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                };
+            } else if operator.is_assign() {
+                let rhs = self.expression(operator.precedence())?;
+                lhs = Expression::Assignment(Box::new(lhs), Box::new(rhs));
+            } else {
+                let rhs = self.expression(operator.precedence() + 1)?;
 
-            lhs = Expression::Binary {
-                operator,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            };
+                lhs = Expression::Binary {
+                    operator,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                };
+            }
         }
 
         Some(lhs)
@@ -93,18 +149,36 @@ impl Parser {
 
     pub fn factor(&mut self) -> Option<Expression> {
         match self.next()? {
+            Token::Ident => {
+                let span = self.current_spanned()?.span.clone();
+                let s = self.source[span].to_string();
+                self.postfix(Expression::Var(Identifier(s)))
+            }
             Token::OpenParen => {
                 let expr = self.expression(0)?;
                 self.consume(Token::CloseParen)?;
-                Some(expr)
+                self.postfix(expr)
             }
-            Token::ConstantInt => Some(Expression::Constant(self.constant()?)),
+            Token::ConstantInt => {
+                // it doesnt make sense to have a postfix operator on a constant, but we look for it anyway,
+                // so that if this is done, we give a more useful error like "invalid lvalue", instead of "unexpected characters"
+                let expr = Expression::Constant(self.constant()?);
+                self.postfix(expr)
+            }
             Token::Hyphen => {
                 let expr = self.factor()?;
                 Some(Expression::Unary {
                     operator: UnaryOperator::Negate,
                     expr: Box::new(expr),
                 })
+            }
+            Token::Decrement => {
+                let expr = self.factor()?;
+                Some(Expression::Prefix(IncDec::Decrement, Box::new(expr)))
+            }
+            Token::Increment => {
+                let expr = self.factor()?;
+                Some(Expression::Prefix(IncDec::Increment, Box::new(expr)))
             }
             Token::Tilde => {
                 let expr = self.factor()?;
@@ -130,6 +204,23 @@ impl Parser {
                 None
             }
         }
+    }
+
+    fn postfix(&mut self, mut expr: Expression) -> Option<Expression> {
+        loop {
+            match self.peek() {
+                Some(Token::Increment) => {
+                    self.next();
+                    expr = Expression::Postfix(IncDec::Increment, Box::new(expr));
+                }
+                Some(Token::Decrement) => {
+                    self.next();
+                    expr = Expression::Postfix(IncDec::Decrement, Box::new(expr));
+                }
+                _ => break,
+            }
+        }
+        Some(expr)
     }
 
     pub fn constant(&mut self) -> Option<Constant> {
@@ -214,12 +305,16 @@ impl Parser {
         }
     }
 
-    pub fn consume_if_present(&mut self, token: Token) {
+    pub fn consume_if_present(&mut self, token: Token) -> Option<()> {
         if let Some(current) = self.peek() {
             if *current == token {
                 self.next();
+                return Some(());
+            } else {
             }
         }
+
+        None
     }
 
     pub fn consume(&mut self, expected: Token) -> Option<()> {

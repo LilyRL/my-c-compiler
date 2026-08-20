@@ -48,8 +48,6 @@ pub enum BinaryOperator {
     Remainder,
     LeftShift,
     RightShift,
-    LogicalLeftShift,
-    LogicalRightShift,
     BitwiseAnd,
     BitwiseXor,
     BitwiseOr,

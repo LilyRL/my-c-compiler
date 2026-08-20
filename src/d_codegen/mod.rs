@@ -3,6 +3,9 @@ use std::collections::BTreeMap;
 
 pub use data::*;
 
+pub const R10: Operand = Operand::Reg(Register::R10);
+pub const R11: Operand = Operand::Reg(Register::R11);
+
 pub fn transform(program: &mut Program) {
     let bytes_required = replace_pseudoregisters(&mut program.0);
     allocate_stack_space(&mut program.0, bytes_required);
@@ -44,7 +47,14 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition) -> u32 {
             Instruction::Idiv(operand) => {
                 process_operand(operand);
             }
-            Instruction::Cdq | Instruction::AllocateStack(_) | Instruction::Ret => {}
+            Instruction::Cmp(a, b) => {
+                process_operand(a);
+                process_operand(b);
+            }
+            Instruction::SetCC(_, operand) => {
+                process_operand(operand);
+            }
+            _ => {}
         }
     }
 
@@ -64,17 +74,10 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
     while i < function.instructions.len() {
         match function.instructions[i].clone() {
             Instruction::Mov { src, dst } if src.is_stack() && dst.is_stack() => {
-                function.instructions[i] = Instruction::Mov {
-                    src: Operand::Reg(Register::R10),
-                    dst,
-                };
-                function.instructions.insert(
-                    i,
-                    Instruction::Mov {
-                        src,
-                        dst: Operand::Reg(Register::R10),
-                    },
-                );
+                function.instructions[i] = Instruction::Mov { src: R10, dst };
+                function
+                    .instructions
+                    .insert(i, Instruction::Mov { src, dst: R10 });
                 i += 1;
             }
             Instruction::Binary { operator, src, dst }
@@ -82,35 +85,42 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
             {
                 function.instructions[i] = Instruction::Binary {
                     operator,
-                    src: Operand::Reg(Register::R10),
+                    src: R10,
+                    dst,
+                };
+                function
+                    .instructions
+                    .insert(i, Instruction::Mov { src, dst: R10 });
+                i += 1;
+            }
+            Instruction::Binary { operator, src, dst } if operator.is_shift() && src.is_stack() => {
+                // cnt must be in %ecx
+                function.instructions[i] = Instruction::Binary {
+                    operator,
+                    src: Operand::Reg(Register::Cx),
                     dst,
                 };
                 function.instructions.insert(
                     i,
                     Instruction::Mov {
                         src,
-                        dst: Operand::Reg(Register::R10),
+                        dst: Operand::Reg(Register::Cx),
                     },
                 );
                 i += 1;
             }
-            Instruction::Binary { operator, src, dst } if operator.is_shift() => {
-                // cnt must be in %ecx
-                if src.is_stack() {
-                    function.instructions[i] = Instruction::Binary {
-                        operator,
-                        src: Operand::Reg(Register::Cx),
-                        dst,
-                    };
-                    function.instructions.insert(
-                        i,
-                        Instruction::Mov {
-                            src,
-                            dst: Operand::Reg(Register::Cx),
-                        },
-                    );
-                    i += 1;
-                }
+            Instruction::Cmp(a, b) if a.is_stack() && b.is_stack() => {
+                function.instructions[i] = Instruction::Cmp(R10, b);
+                function
+                    .instructions
+                    .insert(i, Instruction::Mov { src: a, dst: R10 });
+                i += 1;
+            }
+            Instruction::Cmp(a, b) if b.is_constant() => {
+                function.instructions[i] = Instruction::Cmp(a, R11);
+                function
+                    .instructions
+                    .insert(i, Instruction::Mov { src: b, dst: R11 });
             }
             _ => (),
         }
@@ -128,7 +138,7 @@ pub fn rewrite_invalid_imul_memory_dst(function: &mut FunctionDefinition) {
                 if dst.is_stack() {
                     function.instructions[i] = Instruction::Mov {
                         src: dst.clone(),
-                        dst: Operand::Reg(Register::R11),
+                        dst: R11,
                     };
 
                     function.instructions.insert(
@@ -136,17 +146,13 @@ pub fn rewrite_invalid_imul_memory_dst(function: &mut FunctionDefinition) {
                         Instruction::Binary {
                             operator,
                             src: src,
-                            dst: Operand::Reg(Register::R11),
+                            dst: R11,
                         },
                     );
 
-                    function.instructions.insert(
-                        i + 2,
-                        Instruction::Mov {
-                            src: Operand::Reg(Register::R11),
-                            dst: dst,
-                        },
-                    );
+                    function
+                        .instructions
+                        .insert(i + 2, Instruction::Mov { src: R11, dst: dst });
 
                     i += 2;
                 }
@@ -166,12 +172,10 @@ pub fn rewrite_constant_idiv_operands(function: &mut FunctionDefinition) {
                 if let Operand::Imm(_) = operand {
                     function.instructions[i] = Instruction::Mov {
                         src: operand,
-                        dst: Operand::Reg(Register::R10),
+                        dst: R10,
                     };
 
-                    function
-                        .instructions
-                        .insert(i + 1, Instruction::Idiv(Operand::Reg(Register::R10)));
+                    function.instructions.insert(i + 1, Instruction::Idiv(R10));
 
                     i += 1;
                 }

@@ -1,5 +1,9 @@
 /target
 test.i
 test.s
+test.ir
+test.ast
+test.tokens
 test
 writing-a-c-compiler-tests
+book.pdf

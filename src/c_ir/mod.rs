@@ -5,6 +5,7 @@ use std::fmt::Display;
 
 use crate::codegen;
 use crate::codegen::{Operand, Register};
+use crate::d_codegen::CondCode;
 
 impl Value {
     pub fn lower(self) -> codegen::Operand {
@@ -24,6 +25,21 @@ impl Instruction {
                     dst: codegen::Operand::Reg(codegen::Register::Ax),
                 });
                 instructions.push(codegen::Instruction::Ret);
+            }
+            Self::Unary {
+                operator: UnaryOperator::Not,
+                src,
+                dst,
+            } => {
+                let src = src.lower();
+                let dst = dst.lower();
+
+                instructions.push(codegen::Instruction::Cmp(Operand::Imm(0), src));
+                instructions.push(codegen::Instruction::Mov {
+                    src: Operand::Imm(0),
+                    dst: dst.clone(),
+                });
+                instructions.push(codegen::Instruction::SetCC(CondCode::Eq, dst));
             }
             Self::Unary { operator, src, dst } => {
                 let dst = dst.lower();
@@ -46,36 +62,78 @@ impl Instruction {
                 let lhs = lhs.lower();
                 let rhs = rhs.lower();
 
-                if operator.not_divide_or_remainder() {
-                    instructions.push(codegen::Instruction::Mov {
-                        src: lhs,
-                        dst: dst.clone(),
-                    });
-                    instructions.push(codegen::Instruction::Binary {
-                        operator: operator.lower(),
-                        src: rhs,
-                        dst,
-                    });
-                } else {
-                    let register = match operator {
-                        BinaryOperator::Divide => Register::Ax,
-                        BinaryOperator::Remainder => Register::Dx,
-                        _ => unreachable!(),
-                    };
+                match operator {
+                    BinaryOperator::Divide | BinaryOperator::Remainder => {
+                        let register = match operator {
+                            BinaryOperator::Divide => Register::Ax,
+                            BinaryOperator::Remainder => Register::Dx,
+                            _ => unreachable!(),
+                        };
 
-                    instructions.push(codegen::Instruction::Mov {
-                        src: lhs,
-                        dst: Operand::Reg(Register::Ax),
-                    });
-                    instructions.push(codegen::Instruction::Cdq);
-                    instructions.push(codegen::Instruction::Idiv(rhs));
-                    instructions.push(codegen::Instruction::Mov {
-                        src: Operand::Reg(register),
-                        dst,
-                    });
+                        instructions.push(codegen::Instruction::Mov {
+                            src: lhs,
+                            dst: Operand::Reg(Register::Ax),
+                        });
+                        instructions.push(codegen::Instruction::Cdq);
+                        instructions.push(codegen::Instruction::Idiv(rhs));
+                        instructions.push(codegen::Instruction::Mov {
+                            src: Operand::Reg(register),
+                            dst,
+                        });
+                    }
+                    BinaryOperator::GreaterThan
+                    | BinaryOperator::LessThan
+                    | BinaryOperator::GreaterEqual
+                    | BinaryOperator::LessEqual
+                    | BinaryOperator::Equal
+                    | BinaryOperator::NotEqual => {
+                        let cond_code = match operator {
+                            BinaryOperator::GreaterThan => CondCode::Gt,
+                            BinaryOperator::LessThan => CondCode::Lt,
+                            BinaryOperator::GreaterEqual => CondCode::Ge,
+                            BinaryOperator::LessEqual => CondCode::Le,
+                            BinaryOperator::Equal => CondCode::Eq,
+                            BinaryOperator::NotEqual => CondCode::Ne,
+                            _ => unreachable!(),
+                        };
+
+                        instructions.push(codegen::Instruction::Cmp(rhs, lhs));
+                        instructions.push(codegen::Instruction::Mov {
+                            src: Operand::Imm(0),
+                            dst: dst.clone(),
+                        });
+                        instructions.push(codegen::Instruction::SetCC(cond_code, dst));
+                    }
+
+                    _ => {
+                        instructions.push(codegen::Instruction::Mov {
+                            src: lhs,
+                            dst: dst.clone(),
+                        });
+                        instructions.push(codegen::Instruction::Binary {
+                            operator: operator.lower(),
+                            src: rhs,
+                            dst,
+                        });
+                    }
                 }
             }
-            _ => todo!(),
+            Self::Jump(label) => instructions.push(codegen::Instruction::Jump(label)),
+            Self::JumpIfZero { condition, target } => {
+                let cond = condition.lower();
+                instructions.push(codegen::Instruction::Cmp(Operand::Imm(0), cond));
+                instructions.push(codegen::Instruction::JumpCC(CondCode::Eq, target))
+            }
+            Self::JumpNotZero { condition, target } => {
+                let cond = condition.lower();
+                instructions.push(codegen::Instruction::Cmp(Operand::Imm(0), cond));
+                instructions.push(codegen::Instruction::JumpCC(CondCode::Ne, target))
+            }
+            Self::Label(label) => instructions.push(codegen::Instruction::Label(label)),
+            Self::Copy { src, dst } => instructions.push(codegen::Instruction::Mov {
+                src: src.lower(),
+                dst: dst.lower(),
+            }),
         }
     }
 }
@@ -189,8 +247,6 @@ impl BinaryOperator {
             Self::Multiply => codegen::BinaryOperator::Mul,
             Self::LeftShift => codegen::BinaryOperator::LeftShift,
             Self::RightShift => codegen::BinaryOperator::RightShift,
-            Self::LogicalLeftShift => codegen::BinaryOperator::LogicalLeftShift,
-            Self::LogicalRightShift => codegen::BinaryOperator::LogicalRightShift,
             Self::BitwiseAnd => codegen::BinaryOperator::BitwiseAnd,
             Self::BitwiseXor => codegen::BinaryOperator::BitwiseXor,
             Self::BitwiseOr => codegen::BinaryOperator::BitwiseOr,
@@ -212,8 +268,6 @@ impl BinaryOperator {
             Self::Remainder => "%",
             Self::LeftShift => "<<",
             Self::RightShift => ">>",
-            Self::LogicalLeftShift => "<<<",
-            Self::LogicalRightShift => ">>>",
             Self::BitwiseAnd => "&",
             Self::BitwiseXor => "^",
             Self::BitwiseOr => "|",
