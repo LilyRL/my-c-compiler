@@ -93,6 +93,16 @@ pub enum Token {
     Increment,
     #[token("--")]
     Decrement,
+    #[token("if")]
+    If,
+    #[token("else")]
+    Else,
+    #[token("?")]
+    QuestionMark,
+    #[token(":")]
+    Colon,
+    #[token("goto")]
+    Goto,
     EndOfInput,
 }
 

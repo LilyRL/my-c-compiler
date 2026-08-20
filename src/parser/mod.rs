@@ -95,6 +95,20 @@ impl Parser {
 
     pub fn statement(&mut self) -> Option<Statement> {
         match self.peek()? {
+            Token::If => {
+                self.next()?;
+                self.consume(Token::OpenParen)?;
+                let cond = self.expression(0)?;
+                self.consume(Token::CloseParen)?;
+                let then = Box::new(self.statement()?);
+
+                let mut else_ = None;
+                if self.consume_if_present(Token::Else).is_some() {
+                    else_ = Some(Box::new(self.statement()?));
+                }
+
+                Some(Statement::If { cond, then, else_ })
+            }
             Token::Return => {
                 self.next()?;
                 let return_val = self.expression(0)?;
@@ -116,31 +130,42 @@ impl Parser {
     pub fn expression(&mut self, min_precedence: u32) -> Option<Expression> {
         let mut lhs = self.factor()?;
 
-        while let Some(operator) = self.peek_binary_operator() {
-            if operator.precedence() < min_precedence {
-                break;
-            }
+        loop {
+            if self.peek() == Some(&Token::QuestionMark) && CONDITIONAL_PRECEDENCE > min_precedence
+            {
+                self.next()?;
+                let mhs = self.expression(0)?;
+                self.consume(Token::Colon)?;
+                let rhs = self.expression(CONDITIONAL_PRECEDENCE)?;
+                lhs = Expression::Conditional(Box::new(lhs), Box::new(mhs), Box::new(rhs));
+            } else if let Some(operator) = self.peek_binary_operator() {
+                if operator.precedence() < min_precedence {
+                    break;
+                }
 
-            self.next()?;
+                self.next()?;
 
-            if operator.is_compound_assign() {
-                let rhs = self.expression(operator.precedence())?;
-                lhs = Expression::CompoundAssign {
-                    operator,
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                };
-            } else if operator.is_assign() {
-                let rhs = self.expression(operator.precedence())?;
-                lhs = Expression::Assignment(Box::new(lhs), Box::new(rhs));
+                if operator.is_compound_assign() {
+                    let rhs = self.expression(operator.precedence())?;
+                    lhs = Expression::CompoundAssign {
+                        operator,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    };
+                } else if operator.is_assign() {
+                    let rhs = self.expression(operator.precedence())?;
+                    lhs = Expression::Assignment(Box::new(lhs), Box::new(rhs));
+                } else {
+                    let rhs = self.expression(operator.precedence() + 1)?;
+
+                    lhs = Expression::Binary {
+                        operator,
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    };
+                }
             } else {
-                let rhs = self.expression(operator.precedence() + 1)?;
-
-                lhs = Expression::Binary {
-                    operator,
-                    lhs: Box::new(lhs),
-                    rhs: Box::new(rhs),
-                };
+                break;
             }
         }
 

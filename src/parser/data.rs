@@ -1,10 +1,10 @@
 use strum::EnumIs;
 
-use std::{fmt::Display, ops::Deref};
+use std::fmt::Display;
 
 use crate::{
-    a_lexer::Token,
-    c_ir::{Instruction, Value},
+    lexer::Token,
+    ir::{Instruction, Value},
     ir,
 };
 
@@ -45,6 +45,11 @@ pub enum BlockItem {
 pub enum Statement {
     Return(Expression),
     Expression(Expression),
+    If {
+        cond: Expression,
+        then: Box<Statement>,
+        else_: Option<Box<Statement>>,
+    },
     Null,
 }
 
@@ -75,6 +80,7 @@ pub enum Expression {
     Assignment(Box<Expression>, Box<Expression>),
     Prefix(IncDec, Box<Expression>),
     Postfix(IncDec, Box<Expression>),
+    Conditional(Box<Expression>, Box<Expression>, Box<Expression>),
 }
 
 #[derive(Debug, EnumIs, Clone, Copy)]
@@ -163,6 +169,8 @@ impl UnaryOperator {
         }
     }
 }
+
+pub const CONDITIONAL_PRECEDENCE: u32 = 10;
 
 impl BinaryOperator {
     pub fn precedence(self) -> u32 {
@@ -449,6 +457,30 @@ impl Statement {
             Self::Expression(exp) => {
                 exp.lower(instructions);
             }
+            Self::If { cond, then, else_ } => {
+                let cond = cond.lower(instructions);
+                let end_label = Identifier::new("if_end");
+
+                if let Some(else_) = else_ {
+                    let else_label = Identifier::new("if_else");
+                    instructions.push(Instruction::JumpIfZero {
+                        condition: cond,
+                        target: else_label.clone(),
+                    });
+                    then.lower(instructions);
+                    instructions.push(Instruction::Jump(end_label.clone()));
+                    instructions.push(Instruction::Label(else_label));
+                    else_.lower(instructions);
+                    instructions.push(Instruction::Label(end_label));
+                } else {
+                    instructions.push(Instruction::JumpIfZero {
+                        condition: cond,
+                        target: end_label.clone(),
+                    });
+                    then.lower(instructions);
+                    instructions.push(Instruction::Label(end_label));
+                }
+            }
             Self::Null => (),
         }
     }
@@ -635,6 +667,35 @@ impl Expression {
 
                 old_value
             }
+            Self::Conditional(cond, if_true, if_false) => {
+                let cond = cond.lower(instructions);
+                let else_label = Identifier::new("conditional_else");
+                let end_label = Identifier::new("conditional_end");
+                let result = Value::Var(Identifier::new("conditional_result"));
+
+                instructions.push(Instruction::JumpIfZero {
+                    condition: cond,
+                    target: else_label.clone(),
+                });
+
+                let if_true = if_true.lower(instructions);
+                instructions.push(Instruction::Copy {
+                    src: if_true,
+                    dst: result.clone(),
+                });
+                instructions.push(Instruction::Jump(end_label.clone()));
+
+                instructions.push(Instruction::Label(else_label));
+                let if_false = if_false.lower(instructions);
+                instructions.push(Instruction::Copy {
+                    src: if_false,
+                    dst: result.clone(),
+                });
+
+                instructions.push(Instruction::Label(end_label));
+
+                result
+            }
         }
     }
 }
@@ -669,6 +730,13 @@ impl Display for Statement {
         match self {
             Self::Return(e) => write!(f, "return {};", e),
             Self::Expression(e) => write!(f, "{};", e),
+            Self::If { cond, then, else_ } => {
+                if let Some(else_stmt) = else_ {
+                    write!(f, "if ({}) {{ {} }} else {{ {} }}", cond, then, else_stmt)
+                } else {
+                    write!(f, "if ({}) {{ {} }}", cond, then)
+                }
+            }
             Self::Null => write!(f, "; // null statement"),
         }
     }
@@ -691,6 +759,9 @@ impl Display for Expression {
             }
             Self::Prefix(inc_dec, expr) => write!(f, "({}{})", inc_dec.symbol(), expr),
             Self::Postfix(inc_dec, expr) => write!(f, "({}{})", expr, inc_dec.symbol()),
+            Self::Conditional(cond, if_true, if_false) => {
+                write!(f, "({} ? {} : {})", cond, if_true, if_false)
+            }
         }
     }
 }

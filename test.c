@@ -1,5 +1,5 @@
 int main(void) {
-  int a = 1;
-  int b = !a++;
-  return a == 2 && b == 0;
+  int a = 10;
+  // test that || is higher precedence than ?
+  return a || 0 ? 20 : 0;
 }

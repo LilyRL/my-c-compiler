@@ -6,23 +6,18 @@ use std::{
 
 use clap::Parser;
 
-use a_lexer::lex;
-use b_parser::parse;
+use lexer::lex;
+use parser::parse;
 
-use a_lexer as lexer;
-mod a_lexer;
+mod lexer;
 
-use b_parser as parser;
-mod b_parser;
+mod parser;
 
-use bb_analysis as analysis;
-mod bb_analysis;
+mod analysis;
 
-use c_ir as ir;
-mod c_ir;
+mod ir;
 
-use d_codegen as codegen;
-mod d_codegen;
+mod codegen;
 
 #[derive(Parser, Debug)]
 struct Args {

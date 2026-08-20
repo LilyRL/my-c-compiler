@@ -5,7 +5,7 @@ use std::fmt::Display;
 
 use crate::codegen;
 use crate::codegen::{Operand, Register};
-use crate::d_codegen::CondCode;
+use crate::codegen::CondCode;
 
 impl Value {
     pub fn lower(self) -> codegen::Operand {
