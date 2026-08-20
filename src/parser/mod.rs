@@ -2,8 +2,12 @@ use std::ops::Range;
 
 use crate::lexer::{SpannedToken, Token};
 
-pub use data::*;
-mod data;
+pub use ast::*;
+use thiserror::Error;
+
+mod ast;
+mod debug;
+mod lowering;
 
 pub struct Parser {
     source: String,
@@ -12,17 +16,17 @@ pub struct Parser {
     i: usize,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    ExpectedToken {
-        expected: Token,
-        found: Token,
-        span: Range<usize>,
-    },
-    UnexpectedToken {
-        found: Token,
-        span: Range<usize>,
-    },
+pub struct Error {
+    ty: ErrorType,
+    span: Range<usize>,
+}
+
+#[derive(Debug, Error)]
+pub enum ErrorType {
+    #[error("Unexpected token. Expected {expected} found {found}")]
+    ExpectedToken { expected: Token, found: Token },
+    #[error("Unexpected token. Found {found}")]
+    UnexpectedToken { found: Token },
 }
 
 impl Parser {
@@ -40,6 +44,21 @@ impl Parser {
         self.consume(Token::EndOfInput)?;
 
         Some(Program(function))
+    }
+
+    pub fn print_errors(&self, file_name: &str) {
+        use ariadne::{Label, Report, ReportKind, Source};
+
+        for error in &self.errors {
+            Report::build(ReportKind::Error, (file_name, error.span.clone()))
+                .with_label(
+                    Label::new((file_name, error.span.clone()))
+                        .with_message(format!("{}", error.ty)),
+                )
+                .finish()
+                .print((file_name, Source::from(&self.source)))
+                .unwrap();
+        }
     }
 
     pub fn function_definition(&mut self) -> Option<FunctionDefinition> {
@@ -95,6 +114,21 @@ impl Parser {
 
     pub fn statement(&mut self) -> Option<Statement> {
         match self.peek()? {
+            Token::OpenBrace => {
+                let block = self.block()?;
+                Some(Statement::Compound(block))
+            }
+            Token::Ident if self.double_peek() == Some(&Token::Colon) => {
+                let name = self.ident()?.with_suffix(".goto_label");
+                self.next()?;
+                Some(Statement::Label(name))
+            }
+            Token::Goto => {
+                self.next()?;
+                let name = self.ident()?.with_suffix(".goto_label");
+                self.consume(Token::Semicolon)?;
+                Some(Statement::Goto(name))
+            }
             Token::If => {
                 self.next()?;
                 self.consume(Token::OpenParen)?;
@@ -221,9 +255,11 @@ impl Parser {
             }
             _ => {
                 let current = self.current_spanned();
-                self.errors.push(Error::UnexpectedToken {
-                    found: self.current()?.clone(),
+                self.errors.push(Error {
                     span: current?.span.clone(),
+                    ty: ErrorType::UnexpectedToken {
+                        found: self.current()?.clone(),
+                    },
                 });
 
                 None
@@ -284,14 +320,20 @@ impl Parser {
         self.i >= self.tokens.len()
     }
 
+    pub fn is_nearly_at_end(&self) -> bool {
+        self.i + 1 >= self.tokens.len()
+    }
+
     pub fn next(&mut self) -> Option<&Token> {
         if !self.is_at_end() {
             let token = &self.tokens[self.i];
             self.i += 1;
             Some(&token.token)
         } else {
-            self.errors.push(Error::UnexpectedToken {
-                found: Token::EndOfInput,
+            self.errors.push(Error {
+                ty: ErrorType::UnexpectedToken {
+                    found: Token::EndOfInput,
+                },
                 span: self.source.len()..self.source.len(),
             });
             None
@@ -323,7 +365,7 @@ impl Parser {
     }
 
     pub fn double_peek(&self) -> Option<&Token> {
-        if self.i + 1 < self.tokens.len() {
+        if !self.is_nearly_at_end() {
             Some(&self.tokens[self.i + 1].token)
         } else {
             None
@@ -348,9 +390,8 @@ impl Parser {
                 Some(())
             } else {
                 let span = self.tokens[self.i - 1].span.clone();
-                self.errors.push(Error::ExpectedToken {
-                    expected,
-                    found,
+                self.errors.push(Error {
+                    ty: ErrorType::ExpectedToken { expected, found },
                     span,
                 });
                 None
@@ -361,9 +402,11 @@ impl Parser {
             } else {
                 0..0
             };
-            self.errors.push(Error::ExpectedToken {
-                expected,
-                found: Token::EndOfInput,
+            self.errors.push(Error {
+                ty: ErrorType::ExpectedToken {
+                    expected,
+                    found: Token::EndOfInput,
+                },
                 span,
             });
             None
@@ -376,15 +419,12 @@ impl Parser {
     }
 }
 
-pub fn parse(source: String, tokens: Vec<SpannedToken>) -> Option<Program> {
+pub fn parse(source: String, tokens: Vec<SpannedToken>, file_name: &str) -> Option<Program> {
     let mut parser = Parser::new(source, tokens);
     let program = parser.parse();
 
     if !parser.errors.is_empty() {
-        for error in parser.errors {
-            // TODO: replace with some ariadne pretty printing
-            println!("{:?}", error);
-        }
+        parser.print_errors(file_name);
         std::process::exit(1);
     }
 

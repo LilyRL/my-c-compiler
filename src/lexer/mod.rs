@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{fmt::Display, ops::Range};
 
 use logos::Logos;
 use strum::EnumIs;
@@ -135,4 +135,61 @@ pub fn lex(source: &str) -> Option<Vec<SpannedToken>> {
     });
 
     Some(tokens)
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Token::Ident => "identifier",
+            Token::ConstantInt => "constant",
+            Token::Int => "int",
+            Token::Void => "void",
+            Token::Return => "return",
+            Token::OpenParen => "(",
+            Token::CloseParen => ")",
+            Token::OpenBrace => "{",
+            Token::CloseBrace => "}",
+            Token::Semicolon => ";",
+            Token::Tilde => "~",
+            Token::Hyphen => "-",
+            Token::Plus => "+",
+            Token::Asterisk => "*",
+            Token::Slash => "/",
+            Token::Percent => "%",
+            Token::Ampersand => "&",
+            Token::Caret => "^",
+            Token::Pipe => "|",
+            Token::LeftShift => "<<",
+            Token::RightShift => ">>",
+            Token::Not => "!",
+            Token::LogicalAnd => "&&",
+            Token::LogicalOr => "||",
+            Token::Equal => "==",
+            Token::NotEqual => "!=",
+            Token::LessThan => "<",
+            Token::LessEqual => "<=",
+            Token::GreaterThan => ">",
+            Token::GreaterEqual => ">=",
+            Token::Assign => "=",
+            Token::AddAssign => "+=",
+            Token::SubtractAssign => "-=",
+            Token::MultiplyAssign => "*=",
+            Token::DivideAssign => "/=",
+            Token::RemainderAssign => "%=",
+            Token::BitwiseAndAssign => "&=",
+            Token::BitwiseXorAssign => "^=",
+            Token::BitwiseOrAssign => "|=",
+            Token::RightShiftAssign => ">>=",
+            Token::LeftShiftAssign => "<<=",
+            Token::Increment => "++",
+            Token::Decrement => "--",
+            Token::If => "if",
+            Token::Else => "else",
+            Token::QuestionMark => "?",
+            Token::Colon => ":",
+            Token::Goto => "goto",
+            Token::EndOfInput => "end of input",
+        };
+        write!(f, "{}", s)
+    }
 }

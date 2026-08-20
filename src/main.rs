@@ -9,15 +9,11 @@ use clap::Parser;
 use lexer::lex;
 use parser::parse;
 
-mod lexer;
-
-mod parser;
-
 mod analysis;
-
-mod ir;
-
 mod codegen;
+mod ir;
+mod lexer;
+mod parser;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -102,7 +98,8 @@ fn compile_pipeline(source: &str, args: &Args, paths: &Paths) -> Result<Option<S
         let _ = fs::write(&paths.tokens, format!("{:#?}", tokens));
     }
 
-    let mut program = parse(source.to_string(), tokens).ok_or("Parsing failed")?;
+    let mut program = parse(source.to_string(), tokens, &paths.input.to_string_lossy())
+        .ok_or("Parsing failed")?;
     if args.parse {
         println!("{}", program);
         return Ok(None);

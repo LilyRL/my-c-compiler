@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::parser::{
-    BlockItem, Constant, Declaration, Expression, Identifier, Program, Statement,
+    Block, BlockItem, Constant, Declaration, Expression, Identifier, Program, Statement,
 };
 
 #[derive(Debug)]
@@ -14,6 +14,24 @@ pub enum SemanticError {
 pub fn validate_program(program: &mut Program) -> Result<(), SemanticError> {
     add_return_zero(program);
     resolve_all_variables(program)
+}
+
+type VariableMap = HashMap<Identifier, ScopedVariable>;
+
+#[derive(Clone)]
+struct ScopedVariable {
+    resolved_name: Identifier,
+    from_this_scope: bool,
+}
+
+fn create_inner_scope(outer_map: &VariableMap) -> VariableMap {
+    let mut map = outer_map.clone();
+
+    for (_, v) in map.iter_mut() {
+        v.from_this_scope = false;
+    }
+
+    map
 }
 
 // TODO: when we add multiple functions, this only has to be applied to the main function
@@ -35,16 +53,12 @@ fn add_return_zero(program: &mut Program) {
 fn resolve_all_variables(program: &mut Program) -> Result<(), SemanticError> {
     let mut variable_map = HashMap::new();
 
-    for block_item in program.0.block.iter_mut() {
-        resolve_block_item(block_item, &mut variable_map)?;
-    }
-
-    Ok(())
+    resolve_block(&mut program.0.block, &mut variable_map)
 }
 
 fn resolve_block_item(
     item: &mut crate::parser::BlockItem,
-    variable_map: &mut HashMap<Identifier, Identifier>,
+    variable_map: &mut VariableMap,
 ) -> Result<(), SemanticError> {
     match item {
         crate::parser::BlockItem::Decl(decl) => resolve_declaration(decl, variable_map),
@@ -52,9 +66,17 @@ fn resolve_block_item(
     }
 }
 
+fn resolve_block(block: &mut Block, variable_map: &mut VariableMap) -> Result<(), SemanticError> {
+    for block_item in block.iter_mut() {
+        resolve_block_item(block_item, variable_map)?;
+    }
+
+    Ok(())
+}
+
 fn resolve_statement(
     stmt: &mut Statement,
-    variable_map: &mut HashMap<Identifier, Identifier>,
+    variable_map: &mut VariableMap,
 ) -> Result<(), SemanticError> {
     match stmt {
         Statement::Return(e) => resolve_expression(e, variable_map),
@@ -67,20 +89,32 @@ fn resolve_statement(
             }
             Ok(())
         }
-        Statement::Null => Ok(()),
+        Statement::Compound(block) => {
+            let mut new_map = create_inner_scope(variable_map);
+            resolve_block(block, &mut new_map)
+        }
+        Statement::Null | Statement::Goto(_) | Statement::Label(_) => Ok(()),
     }
 }
 
 fn resolve_declaration(
     Declaration { name, init }: &mut Declaration,
-    variable_map: &mut HashMap<Identifier, Identifier>,
+    variable_map: &mut VariableMap,
 ) -> Result<(), SemanticError> {
-    if variable_map.contains_key(&name) {
+    if let Some(var) = variable_map.get(name)
+        && var.from_this_scope
+    {
         return Err(SemanticError::VariableRedeclaration(name.0.to_string()));
     }
 
     let unique_name = Identifier::new(&name.0);
-    variable_map.insert(name.clone(), unique_name.clone());
+    variable_map.insert(
+        name.clone(),
+        ScopedVariable {
+            resolved_name: unique_name.clone(),
+            from_this_scope: true,
+        },
+    );
 
     if let Some(init) = init {
         resolve_expression(init, variable_map)?;
@@ -93,7 +127,7 @@ fn resolve_declaration(
 
 fn resolve_expression(
     expr: &mut Expression,
-    variable_map: &mut HashMap<Identifier, Identifier>,
+    variable_map: &mut VariableMap,
 ) -> Result<(), SemanticError> {
     match expr {
         Expression::Assignment(l, r) => {
@@ -108,7 +142,7 @@ fn resolve_expression(
         }
         Expression::Var(i) => {
             if let Some(unique_name) = variable_map.get(i) {
-                *i = unique_name.clone();
+                *i = unique_name.resolved_name.clone();
                 Ok(())
             } else {
                 Err(SemanticError::UndeclaredVariable(i.0.to_string()))
