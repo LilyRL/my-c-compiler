@@ -1,5 +1,8 @@
+use std::collections::{HashMap, HashSet};
+
 use crate::ir;
 use crate::lexer::Token;
+use clap::error::ContextKind;
 use strum::EnumIs;
 
 #[derive(Debug)]
@@ -17,19 +20,42 @@ pub struct FunctionDefinition {
 pub struct Identifier(pub String);
 
 impl Identifier {
-    fn inner() -> String {
+    fn rand() -> String {
         (0..4).map(|_| rand::random_range('a'..'z')).collect()
     }
 
     pub fn new(name: &str) -> Self {
         #[cfg(target_os = "linux")]
-        return Self(format!(".L_{name}__{}", Self::inner()));
+        return Self(format!(".L_{name}__{}", Self::rand()));
         #[cfg(target_os = "macos")]
-        return Self(format!("L_{name}__{}", Self::inner()));
+        return Self(format!("L_{name}__{}", Self::rand()));
+    }
+
+    pub fn local(&self) -> Self {
+        #[cfg(target_os = "linux")]
+        return Self(format!(".L_{}", self.0));
+        #[cfg(target_os = "macos")]
+        return Self(format!("L_{}", self.0));
     }
 
     pub fn with_suffix(&self, suffix: &str) -> Self {
         return Self(format!("{}{suffix}", self.0));
+    }
+
+    pub fn _start(&self) -> Self {
+        self.with_suffix("_start")
+    }
+
+    pub fn _break(&self) -> Self {
+        self.with_suffix("_break")
+    }
+
+    pub fn _continue(&self) -> Self {
+        self.with_suffix("_continue")
+    }
+
+    pub fn dummy() -> Self {
+        return Self("DUMMY_IDENTIFIER__SHOULD_NOT_APPEAR_IN_OUTPUT".to_string());
     }
 }
 
@@ -50,8 +76,57 @@ pub enum Statement {
     },
     Null,
     Goto(Identifier),
-    Label(Identifier),
+    Label(Identifier, Box<Statement>),
     Compound(Block),
+    Break(Identifier),
+    Continue(Identifier),
+    While {
+        cond: Expression,
+        body: Box<Statement>,
+        label: Identifier,
+    },
+    DoWhile {
+        body: Box<Statement>,
+        cond: Expression,
+        label: Identifier,
+    },
+    For {
+        init: ForInit,
+        condition: Option<Expression>,
+        post: Option<Expression>,
+        body: Box<Statement>,
+        label: Identifier,
+    },
+    Switch(Switch),
+    Case {
+        value: Constant,
+        label: Identifier,
+        stmt: Box<Statement>,
+    },
+    DefaultCase {
+        label: Identifier,
+        stmt: Box<Statement>,
+    },
+}
+
+#[derive(Debug)]
+pub struct Switch {
+    pub value: Expression,
+    pub body: Box<Statement>,
+    pub label: Identifier,
+
+    pub case_set: HashSet<Constant>,
+    pub cases: Vec<SwitchCase>,
+    pub default_case: Option<Identifier>,
+}
+
+pub type SwitchCase = (Identifier, Constant);
+
+#[derive(Debug)]
+pub enum ForInit {
+    Decl(Declaration),
+    Expr(Expression),
+    None,
 }
 
 #[derive(Debug)]
@@ -404,7 +479,15 @@ impl BinaryOperator {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Clone)]
 pub enum Constant {
     Int(i32),
+}
+
+impl Constant {
+    pub fn i32(self) -> i32 {
+        match self {
+            Self::Int(i) => i,
+        }
+    }
 }

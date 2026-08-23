@@ -101,12 +101,12 @@ fn compile_pipeline(source: &str, args: &Args, paths: &Paths) -> Result<Option<S
     let mut program = parse(source.to_string(), tokens, &paths.input.to_string_lossy())
         .ok_or("Parsing failed")?;
     if args.parse {
-        println!("{}", program);
+        println!("{:#?}", program);
         return Ok(None);
     }
 
     if args.keep_intermediates {
-        let _ = fs::write(&paths.parsed_ast, format!("{program}"));
+        let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
     }
 
     let analysis_result = analysis::validate_program(&mut program);

@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 
 cargo build
-./writing-a-c-compiler-tests/test_compiler target/debug/my-c-compiler --bitwise --increment --compound --goto "$@"
+./writing-a-c-compiler-tests/test_compiler target/debug/my-c-compiler --bitwise --increment --compound --goto --switch "$@"

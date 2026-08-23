@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashSet, ops::Range};
 
 use crate::lexer::{SpannedToken, Token};
 
@@ -119,13 +119,14 @@ impl Parser {
                 Some(Statement::Compound(block))
             }
             Token::Ident if self.double_peek() == Some(&Token::Colon) => {
-                let name = self.ident()?.with_suffix(".goto_label");
+                let name = self.ident()?.with_suffix(".goto_label").local();
                 self.next()?;
-                Some(Statement::Label(name))
+                let stmt = self.statement()?;
+                Some(Statement::Label(name, Box::new(stmt)))
             }
             Token::Goto => {
                 self.next()?;
-                let name = self.ident()?.with_suffix(".goto_label");
+                let name = self.ident()?.with_suffix(".goto_label").local();
                 self.consume(Token::Semicolon)?;
                 Some(Statement::Goto(name))
             }
@@ -153,11 +154,128 @@ impl Parser {
                 self.next()?;
                 Some(Statement::Null)
             }
+            Token::Break => {
+                self.next()?;
+                self.consume(Token::Semicolon)?;
+                Some(Statement::Break(Identifier::dummy()))
+            }
+            Token::Continue => {
+                self.next()?;
+                self.consume(Token::Semicolon)?;
+                Some(Statement::Continue(Identifier::dummy()))
+            }
+            Token::While => {
+                self.next()?;
+                self.consume(Token::OpenParen)?;
+                let cond = self.expression(0)?;
+                self.consume(Token::CloseParen)?;
+                let body = self.statement()?;
+                Some(Statement::While {
+                    cond,
+                    body: Box::new(body),
+                    label: Identifier::new("while"),
+                })
+            }
+            Token::Do => {
+                self.next()?;
+                let body = self.statement()?;
+                self.consume(Token::While)?;
+                self.consume(Token::OpenParen)?;
+                let cond = self.expression(0)?;
+                self.consume(Token::CloseParen)?;
+                self.consume(Token::Semicolon)?;
+
+                Some(Statement::DoWhile {
+                    body: Box::new(body),
+                    cond,
+                    label: Identifier::new("do_while"),
+                })
+            }
+            Token::For => {
+                self.next()?;
+                self.consume(Token::OpenParen)?;
+
+                let init = self.for_init()?;
+                let condition = self.expression_or_nothing();
+                self.consume(Token::Semicolon)?;
+                let post = self.expression_or_nothing();
+                self.consume(Token::CloseParen)?;
+                let body = self.statement()?;
+
+                Some(Statement::For {
+                    init,
+                    condition: condition,
+                    post: post,
+                    body: Box::new(body),
+                    label: Identifier::new("for"),
+                })
+            }
+            Token::Switch => {
+                self.next()?;
+                self.consume(Token::OpenParen)?;
+                let value = self.expression(0)?;
+                self.consume(Token::CloseParen)?;
+                let body = self.statement()?;
+
+                Some(Statement::Switch(Switch {
+                    value,
+                    label: Identifier::new("switch"),
+                    body: Box::new(body),
+                    case_set: HashSet::new(),
+                    cases: Vec::new(),
+                    default_case: None,
+                }))
+            }
+            Token::Case => {
+                self.next()?;
+                self.next()?; // advance onto constant token, self.constant doesnt consume anything
+                let value = self.constant()?;
+                self.consume(Token::Colon)?;
+                let stmt = self.statement()?;
+                Some(Statement::Case {
+                    value,
+                    stmt: Box::new(stmt),
+                    label: Identifier::new("case"),
+                })
+            }
+            Token::Default => {
+                self.next()?;
+                self.consume(Token::Colon)?;
+                let stmt = self.statement()?;
+                Some(Statement::DefaultCase {
+                    label: Identifier::new("default_case"),
+                    stmt: Box::new(stmt),
+                })
+            }
             _ => {
                 let expr = self.expression(0)?;
                 self.consume(Token::Semicolon)?;
                 Some(Statement::Expression(expr))
             }
+        }
+    }
+
+    /// consumes semicolon
+    pub fn for_init(&mut self) -> Option<ForInit> {
+        if self.peek() == Some(&Token::Semicolon) {
+            self.next()?;
+            return Some(ForInit::None);
+        }
+
+        if self.peek() == Some(&Token::Int) {
+            let decl = self.declaration()?;
+            return Some(ForInit::Decl(decl));
+        }
+
+        let expr = self.expression(0)?;
+        self.consume(Token::Semicolon)?;
+        Some(ForInit::Expr(expr))
+    }
+
+    pub fn expression_or_nothing(&mut self) -> Option<Expression> {
+        match self.peek()? {
+            Token::Semicolon | Token::CloseParen => None,
+            _ => self.expression(0),
         }
     }
 
@@ -284,10 +402,12 @@ impl Parser {
         Some(expr)
     }
 
+    /// doesnt consume any tokens
     pub fn constant(&mut self) -> Option<Constant> {
         Some(Constant::Int(self.int()?))
     }
 
+    /// doesnt consume any tokens
     pub fn int(&mut self) -> Option<i32> {
         match self.current_spanned()? {
             SpannedToken {
@@ -297,7 +417,18 @@ impl Parser {
                 let value = self.source[span.clone()].parse::<i32>().ok()?;
                 Some(value)
             }
-            _ => unreachable!(),
+            _ => {
+                let current = self.current_spanned();
+                self.errors.push(Error {
+                    span: current?.span.clone(),
+                    ty: ErrorType::ExpectedToken {
+                        expected: Token::ConstantInt,
+                        found: self.current()?.clone(),
+                    },
+                });
+
+                None
+            }
         }
     }
 

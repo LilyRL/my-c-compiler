@@ -37,6 +37,7 @@ pub enum Instruction {
         target: Identifier,
     },
     Label(Identifier),
+    Comment(&'static str),
 }
 
 #[derive(Debug, Clone, Copy)]

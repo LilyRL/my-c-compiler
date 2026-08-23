@@ -4,8 +4,8 @@ mod data;
 use std::fmt::Display;
 
 use crate::codegen;
-use crate::codegen::{Operand, Register};
 use crate::codegen::CondCode;
+use crate::codegen::{Operand, Register};
 
 impl Value {
     pub fn lower(self) -> codegen::Operand {
@@ -134,6 +134,7 @@ impl Instruction {
                 src: src.lower(),
                 dst: dst.lower(),
             }),
+            Self::Comment(c) => instructions.push(codegen::Instruction::Comment(c)),
         }
     }
 }
@@ -185,6 +186,7 @@ impl Display for Instruction {
                 write!(f, "\tjnz {} => {}", condition, target.0)
             }
             Self::Label(label) => write!(f, "{}:", label.0),
+            Self::Comment(c) => write!(f, "\t# {}", c),
         }
     }
 }

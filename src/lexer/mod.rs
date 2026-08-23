@@ -103,6 +103,22 @@ pub enum Token {
     Colon,
     #[token("goto")]
     Goto,
+    #[token("do")]
+    Do,
+    #[token("while")]
+    While,
+    #[token("for")]
+    For,
+    #[token("switch")]
+    Switch,
+    #[token("case")]
+    Case,
+    #[token("default")]
+    Default,
+    #[token("break")]
+    Break,
+    #[token("continue")]
+    Continue,
     EndOfInput,
 }
 
@@ -189,6 +205,14 @@ impl Display for Token {
             Token::Colon => ":",
             Token::Goto => "goto",
             Token::EndOfInput => "end of input",
+            Token::Do => "do",
+            Token::While => "while",
+            Token::For => "for",
+            Token::Switch => "switch",
+            Token::Case => "case",
+            Token::Default => "default",
+            Token::Break => "break",
+            Token::Continue => "continue",
         };
         write!(f, "{}", s)
     }

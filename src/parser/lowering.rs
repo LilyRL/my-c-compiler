@@ -27,16 +27,7 @@ impl BlockItem {
     pub fn lower(self, instructions: &mut Vec<Instruction>) {
         match self {
             Self::Stmt(stmt) => stmt.lower(instructions),
-            Self::Decl(decl) => {
-                if let Some(init) = decl.init {
-                    let out = init.lower(instructions);
-                    let copy = Instruction::Copy {
-                        src: out,
-                        dst: Value::Var(decl.name),
-                    };
-                    instructions.push(copy);
-                }
-            }
+            Self::Decl(decl) => decl.lower(instructions),
         }
     }
 }
@@ -75,14 +66,155 @@ impl Statement {
                     instructions.push(Instruction::Label(end_label));
                 }
             }
-            Self::Label(i) => instructions.push(Instruction::Label(i)),
+            Self::DoWhile { body, cond, label } => {
+                let start_label = label._start();
+                let continue_label = label._continue();
+                let break_label = label._break();
+
+                instructions.push(Instruction::Label(start_label.clone()));
+                body.lower(instructions);
+                instructions.push(Instruction::Label(continue_label));
+                let result = cond.lower(instructions);
+                instructions.push(Instruction::JumpNotZero {
+                    condition: result,
+                    target: start_label,
+                });
+                instructions.push(Instruction::Label(break_label));
+            }
+            Self::While { cond, body, label } => {
+                let continue_label = label._continue();
+                let break_label = label._break();
+
+                instructions.push(Instruction::Label(continue_label.clone()));
+                let result = cond.lower(instructions);
+                instructions.push(Instruction::JumpIfZero {
+                    condition: result,
+                    target: break_label.clone(),
+                });
+                body.lower(instructions);
+                instructions.push(Instruction::Jump(continue_label));
+                instructions.push(Instruction::Label(break_label));
+            }
+            Self::For {
+                init,
+                condition,
+                post,
+                body,
+                label,
+            } => {
+                let start_label = label._start();
+                let continue_label = label._continue();
+                let break_label = label._break();
+
+                instructions.push(Instruction::Comment("for loop"));
+                instructions.push(Instruction::Comment("init"));
+                init.lower(instructions);
+                instructions.push(Instruction::Label(start_label.clone()));
+
+                if let Some(condition) = condition {
+                    instructions.push(Instruction::Comment("for loop condition"));
+                    let cond_result = condition.lower(instructions);
+                    instructions.push(Instruction::JumpIfZero {
+                        condition: cond_result,
+                        target: break_label.clone(),
+                    });
+                } else {
+                    instructions.push(Instruction::Comment("no for loop condition"));
+                }
+
+                instructions.push(Instruction::Comment("for loop body"));
+                body.lower(instructions);
+                instructions.push(Instruction::Label(continue_label));
+                if let Some(post) = post {
+                    post.lower(instructions);
+                }
+                instructions.push(Instruction::Jump(start_label));
+                instructions.push(Instruction::Label(break_label));
+            }
+            Self::Label(i, stmt) => {
+                instructions.push(Instruction::Label(i));
+                stmt.lower(instructions);
+            }
             Self::Goto(i) => instructions.push(Instruction::Jump(i)),
             Self::Compound(block) => {
                 for item in block {
                     item.lower(instructions);
                 }
             }
+            Self::Break(i) => {
+                instructions.push(Instruction::Jump(i._break()));
+            }
+            Self::Continue(i) => {
+                instructions.push(Instruction::Jump(i._continue()));
+            }
+            Self::Case { label, stmt, .. } | Self::DefaultCase { label, stmt } => {
+                instructions.push(Instruction::Label(label));
+                stmt.lower(instructions);
+            }
+            Self::Switch(Switch {
+                value,
+                body,
+                label,
+                cases,
+                default_case,
+                ..
+            }) => {
+                let result = value.lower(instructions);
+                let is_equal = Value::Var(Identifier::new("switch_case_is_equal"));
+                let break_label = label._break();
+
+                for (label, constant) in cases {
+                    let case_value = Value::Constant(constant.i32());
+                    instructions.push(Instruction::Binary {
+                        operator: ir::BinaryOperator::Equal,
+                        lhs: case_value,
+                        rhs: result.clone(),
+                        dst: is_equal.clone(),
+                    });
+                    instructions.push(Instruction::JumpNotZero {
+                        condition: is_equal.clone(),
+                        target: label,
+                    });
+                }
+
+                if let Some(default) = default_case {
+                    instructions.push(Instruction::Jump(default));
+                } else {
+                    instructions.push(Instruction::Jump(break_label.clone()));
+                }
+
+                body.lower(instructions);
+
+                instructions.push(Instruction::Label(break_label));
+            }
             Self::Null => (),
+        }
+    }
+}
+
+impl Declaration {
+    pub fn lower(self, instructions: &mut Vec<Instruction>) {
+        if let Some(init) = self.init {
+            let out = init.lower(instructions);
+            let copy = Instruction::Copy {
+                src: out,
+                dst: Value::Var(self.name),
+            };
+            instructions.push(copy);
+        }
+    }
+}
+
+impl ForInit {
+    pub fn lower(self, instructions: &mut Vec<Instruction>) {
+        match self {
+            Self::Decl(decl) => {
+                decl.lower(instructions);
+            }
+            Self::Expr(expr) => {
+                expr.lower(instructions);
+            }
+            Self::None => (),
         }
     }
 }
@@ -297,6 +429,14 @@ impl Expression {
 
                 result
             }
+        }
+    }
+}
+
+impl Constant {
+    pub fn lower(self) -> ir::Value {
+        match self {
+            Constant::Int(i) => ir::Value::Constant(i),
         }
     }
 }
