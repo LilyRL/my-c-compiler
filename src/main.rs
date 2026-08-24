@@ -6,11 +6,13 @@ use std::{
 
 use clap::Parser;
 
+use diagnostics::{Diagnostic, Stage, report_all};
 use lexer::lex;
 use parser::parse;
 
 mod analysis;
 mod codegen;
+mod diagnostics;
 mod ir;
 mod lexer;
 mod parser;
@@ -87,8 +89,12 @@ impl Paths {
     }
 }
 
-fn compile_pipeline(source: &str, args: &Args, paths: &Paths) -> Result<Option<String>, String> {
-    let tokens = lex(source).ok_or("Lexing failed")?;
+fn compile_pipeline(
+    source: &str,
+    args: &Args,
+    paths: &Paths,
+) -> Result<Option<String>, Vec<Diagnostic>> {
+    let tokens = lex(source)?;
     if args.lex {
         println!("{:#?}", tokens);
         return Ok(None);
@@ -98,8 +104,7 @@ fn compile_pipeline(source: &str, args: &Args, paths: &Paths) -> Result<Option<S
         let _ = fs::write(&paths.tokens, format!("{:#?}", tokens));
     }
 
-    let mut program = parse(source.to_string(), tokens, &paths.input.to_string_lossy())
-        .ok_or("Parsing failed")?;
+    let mut program = parse(source.to_string(), tokens)?;
     if args.parse {
         println!("{:#?}", program);
         return Ok(None);
@@ -109,9 +114,12 @@ fn compile_pipeline(source: &str, args: &Args, paths: &Paths) -> Result<Option<S
         let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
     }
 
-    let analysis_result = analysis::validate_program(&mut program);
-    if let Err(e) = analysis_result {
-        return Err(format!("Semantic analysis failed: {:?}", e));
+    let semantic_errors = analysis::validate_program(&mut program);
+    if !semantic_errors.is_empty() {
+        return Err(semantic_errors
+            .iter()
+            .map(|e| Diagnostic::new(Stage::Analysis, e.span().clone(), e.message()))
+            .collect());
     }
     if args.validate {
         return Ok(None);
@@ -142,8 +150,8 @@ fn compile_pipeline(source: &str, args: &Args, paths: &Paths) -> Result<Option<S
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let paths = Paths::new(&args);
+    let file_name = paths.input.to_string_lossy();
 
-    // Run preprocessor directly to stdout to avoid temporary .i files
     let preproc = Command::new("gcc")
         .args(["-E", "-P"])
         .arg(&paths.input)
@@ -151,13 +159,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .output()?;
 
     if !preproc.status.success() {
-        return Err("Preprocessing step (gcc -E) failed".into());
+        return Err(format!(
+            "Preprocessing step (gcc -E) failed:\n{}",
+            String::from_utf8_lossy(&preproc.stderr)
+        )
+        .into());
     }
 
     let preprocessed_source = String::from_utf8(preproc.stdout)?;
 
-    let Some(asm_output) = compile_pipeline(&preprocessed_source, &args, &paths)? else {
-        return Ok(());
+    let asm_output = match compile_pipeline(&preprocessed_source, &args, &paths) {
+        Err(diagnostics) => {
+            report_all(&file_name, &preprocessed_source, &diagnostics);
+            return Err("compilation failed".into());
+        }
+        Ok(None) => return Ok(()),
+        Ok(Some(asm_output)) => asm_output,
     };
 
     fs::write(&paths.assembly, asm_output)?;
@@ -172,7 +189,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .arg(&paths.output)
         .status()?;
 
-    // Clean up .s intermediate unless flagged to keep
     if !args.keep_intermediates {
         let _ = fs::remove_file(&paths.assembly);
     }

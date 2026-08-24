@@ -10,4 +10,3 @@ logos = "0.16.1"
 rand = "0.10.2"
 strum = { version = "0.28.0", features = ["derive"] }
 strum_macros = "0.28.0"
-thiserror = "2.0.20"

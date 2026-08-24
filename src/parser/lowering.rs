@@ -34,15 +34,15 @@ impl BlockItem {
 
 impl Statement {
     pub fn lower(self, instructions: &mut Vec<Instruction>) {
-        match self {
-            Self::Return(c) => {
+        match self.kind {
+            StmtKind::Return(c) => {
                 let dst = c.lower(instructions);
                 instructions.push(Instruction::Return(dst));
             }
-            Self::Expression(exp) => {
+            StmtKind::Expression(exp) => {
                 exp.lower(instructions);
             }
-            Self::If { cond, then, else_ } => {
+            StmtKind::If { cond, then, else_ } => {
                 let cond = cond.lower(instructions);
                 let end_label = Identifier::new("if_end");
 
@@ -66,7 +66,7 @@ impl Statement {
                     instructions.push(Instruction::Label(end_label));
                 }
             }
-            Self::DoWhile { body, cond, label } => {
+            StmtKind::DoWhile { body, cond, label } => {
                 let start_label = label._start();
                 let continue_label = label._continue();
                 let break_label = label._break();
@@ -81,7 +81,7 @@ impl Statement {
                 });
                 instructions.push(Instruction::Label(break_label));
             }
-            Self::While { cond, body, label } => {
+            StmtKind::While { cond, body, label } => {
                 let continue_label = label._continue();
                 let break_label = label._break();
 
@@ -95,7 +95,7 @@ impl Statement {
                 instructions.push(Instruction::Jump(continue_label));
                 instructions.push(Instruction::Label(break_label));
             }
-            Self::For {
+            StmtKind::For {
                 init,
                 condition,
                 post,
@@ -131,27 +131,27 @@ impl Statement {
                 instructions.push(Instruction::Jump(start_label));
                 instructions.push(Instruction::Label(break_label));
             }
-            Self::Label(i, stmt) => {
+            StmtKind::Label(i, stmt) => {
                 instructions.push(Instruction::Label(i));
                 stmt.lower(instructions);
             }
-            Self::Goto(i) => instructions.push(Instruction::Jump(i)),
-            Self::Compound(block) => {
+            StmtKind::Goto(i) => instructions.push(Instruction::Jump(i)),
+            StmtKind::Compound(block) => {
                 for item in block {
                     item.lower(instructions);
                 }
             }
-            Self::Break(i) => {
+            StmtKind::Break(i) => {
                 instructions.push(Instruction::Jump(i._break()));
             }
-            Self::Continue(i) => {
+            StmtKind::Continue(i) => {
                 instructions.push(Instruction::Jump(i._continue()));
             }
-            Self::Case { label, stmt, .. } | Self::DefaultCase { label, stmt } => {
+            StmtKind::Case { label, stmt, .. } | StmtKind::DefaultCase { label, stmt, .. } => {
                 instructions.push(Instruction::Label(label));
                 stmt.lower(instructions);
             }
-            Self::Switch(Switch {
+            StmtKind::Switch(Switch {
                 value,
                 body,
                 label,
@@ -187,7 +187,7 @@ impl Statement {
 
                 instructions.push(Instruction::Label(break_label));
             }
-            Self::Null => (),
+            StmtKind::Null => (),
         }
     }
 }
@@ -221,17 +221,14 @@ impl ForInit {
 
 impl Expression {
     pub fn lower(self, instructions: &mut Vec<Instruction>) -> Value {
-        match self {
-            Self::Assignment(lhs, rhs) => {
+        match self.kind {
+            ExprKind::Assignment(lhs, rhs) => {
                 assert!(
                     lhs.is_var(),
                     "LValues should have been verified to be valid before lowering to IR."
                 );
 
-                let v = match *lhs {
-                    Self::Var(v) => v,
-                    _ => unreachable!(),
-                };
+                let v = lhs.as_var().cloned().unwrap();
 
                 let result = rhs.lower(instructions);
                 instructions.push(Instruction::Copy {
@@ -240,16 +237,13 @@ impl Expression {
                 });
                 return Value::Var(v.clone());
             }
-            Self::CompoundAssign { operator, lhs, rhs } => {
+            ExprKind::CompoundAssign { operator, lhs, rhs } => {
                 assert!(
                     lhs.is_var(),
                     "LValues should have been verified to be valid before lowering to IR."
                 );
 
-                let v = match *lhs {
-                    Self::Var(v) => v,
-                    _ => unreachable!(),
-                };
+                let v = lhs.as_var().cloned().unwrap();
 
                 let lhs_value = Value::Var(v.clone());
                 let rhs_value = rhs.lower(instructions);
@@ -269,9 +263,9 @@ impl Expression {
 
                 return dst;
             }
-            Self::Var(v) => Value::Var(v),
-            Self::Constant(c) => c.lower(),
-            Self::Unary { operator, expr } => {
+            ExprKind::Var(v) => Value::Var(v),
+            ExprKind::Constant(c) => c.lower(),
+            ExprKind::Unary { operator, expr } => {
                 let src = expr.lower(instructions);
                 let dst = Value::Var(Identifier::new("tmp"));
 
@@ -282,7 +276,7 @@ impl Expression {
                 });
                 dst
             }
-            Self::Binary { operator, lhs, rhs } if operator.can_be_lowered() => {
+            ExprKind::Binary { operator, lhs, rhs } if operator.can_be_lowered() => {
                 let lhs = lhs.lower(instructions);
                 let rhs = rhs.lower(instructions);
                 let dst = Value::Var(Identifier::new(operator.name()));
@@ -295,7 +289,7 @@ impl Expression {
                 });
                 return dst;
             }
-            Self::Binary { operator, lhs, rhs } => match operator {
+            ExprKind::Binary { operator, lhs, rhs } => match operator {
                 BinaryOperator::And => {
                     let dst = Value::Var(Identifier::new("and_result"));
                     let false_label = Identifier::new("and_false");
@@ -358,9 +352,9 @@ impl Expression {
 
                     return dst;
                 }
-                _ => unreachable!(),
+                op => unreachable!("operator {op:?} cannot appear here"),
             },
-            Self::Prefix(op, expr) => {
+            ExprKind::Prefix(op, expr) => {
                 assert!(
                     expr.is_var(),
                     "LValues should have been verified to be valid before lowering to IR."
@@ -377,7 +371,7 @@ impl Expression {
 
                 expr
             }
-            Self::Postfix(op, expr) => {
+            ExprKind::Postfix(op, expr) => {
                 assert!(
                     expr.is_var(),
                     "LValues should have been verified to be valid before lowering to IR."
@@ -400,7 +394,7 @@ impl Expression {
 
                 old_value
             }
-            Self::Conditional(cond, if_true, if_false) => {
+            ExprKind::Conditional(cond, if_true, if_false) => {
                 let cond = cond.lower(instructions);
                 let else_label = Identifier::new("conditional_else");
                 let end_label = Identifier::new("conditional_end");

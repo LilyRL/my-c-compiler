@@ -6,8 +6,10 @@ int main(void) {
     case 0:
       continue;
     default:
+      sum += 10;
+    default:
       sum = sum + 1;
     }
   }
-  return sum;
+  return 5;
 }

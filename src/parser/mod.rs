@@ -1,32 +1,28 @@
-use std::{collections::HashSet, ops::Range};
+use std::collections::HashSet;
 
+use crate::diagnostics::{Diagnostic, Span, Stage};
 use crate::lexer::{SpannedToken, Token};
 
 pub use ast::*;
-use thiserror::Error;
-
 mod ast;
 mod debug;
 mod lowering;
+mod operators;
+pub use operators::*;
 
 pub struct Parser {
     source: String,
     tokens: Vec<SpannedToken>,
-    errors: Vec<Error>,
+    errors: Vec<Diagnostic>,
     i: usize,
 }
 
-pub struct Error {
-    ty: ErrorType,
-    span: Range<usize>,
-}
-
-#[derive(Debug, Error)]
-pub enum ErrorType {
-    #[error("Unexpected token. Expected {expected} found {found}")]
-    ExpectedToken { expected: Token, found: Token },
-    #[error("Unexpected token. Found {found}")]
-    UnexpectedToken { found: Token },
+fn expected_msg(expected: Token, found: Token) -> String {
+    if found == Token::EndOfInput {
+        format!("expected {expected} but reached end of input")
+    } else {
+        format!("expected {expected} but found '{found}'")
+    }
 }
 
 impl Parser {
@@ -46,19 +42,25 @@ impl Parser {
         Some(Program(function))
     }
 
-    pub fn print_errors(&self, file_name: &str) {
-        use ariadne::{Label, Report, ReportKind, Source};
+    fn error(&mut self, span: Span, message: impl Into<String>) {
+        self.errors
+            .push(Diagnostic::new(Stage::Parse, span, message));
+    }
 
-        for error in &self.errors {
-            Report::build(ReportKind::Error, (file_name, error.span.clone()))
-                .with_label(
-                    Label::new((file_name, error.span.clone()))
-                        .with_message(format!("{}", error.ty)),
-                )
-                .finish()
-                .print((file_name, Source::from(&self.source)))
-                .unwrap();
-        }
+    fn peek_span(&self) -> Option<Span> {
+        Some(self.tokens.get(self.i)?.span.clone())
+    }
+
+    fn prev_span(&self) -> Option<Span> {
+        Some(self.tokens.get(self.i.checked_sub(1)?)?.span.clone())
+    }
+
+    fn eof_span(&self) -> Span {
+        self.source.len()..self.source.len()
+    }
+
+    fn peek_span_or_eof(&self) -> Span {
+        self.peek_span().unwrap_or_else(|| self.eof_span())
     }
 
     pub fn function_definition(&mut self) -> Option<FunctionDefinition> {
@@ -80,7 +82,7 @@ impl Parser {
         Some(statements)
     }
 
-    pub fn block_items(&mut self) -> Option<Vec<BlockItem>> {
+    pub fn block_items(&mut self) -> Option<Block> {
         let mut items = vec![];
 
         while !self.peek()?.is_close_brace() {
@@ -92,13 +94,14 @@ impl Parser {
 
     pub fn block_item(&mut self) -> Option<BlockItem> {
         if self.peek()?.is_int() {
-            self.declaration().map(|d| BlockItem::Decl(d))
+            self.declaration().map(BlockItem::Decl)
         } else {
-            self.statement().map(|s| BlockItem::Stmt(s))
+            self.statement().map(BlockItem::Stmt)
         }
     }
 
     pub fn declaration(&mut self) -> Option<Declaration> {
+        let start = self.peek_span()?;
         self.consume(Token::Int)?;
         let name = self.ident()?;
         let mut init = None;
@@ -108,90 +111,123 @@ impl Parser {
         }
 
         self.consume(Token::Semicolon)?;
+        let span = start.start..self.prev_span()?.end;
 
-        Some(Declaration { name, init })
+        Some(Declaration { name, init, span })
     }
 
     pub fn statement(&mut self) -> Option<Statement> {
         match self.peek()? {
             Token::OpenBrace => {
+                let start = self.peek_span()?;
                 let block = self.block()?;
-                Some(Statement::Compound(block))
+                let span = start.start..self.prev_span()?.end;
+                Some(Statement::new(StmtKind::Compound(block), span))
             }
             Token::Ident if self.double_peek() == Some(&Token::Colon) => {
                 let name = self.ident()?.with_suffix(".goto_label").local();
+                let start = self.prev_span()?;
                 self.next()?;
-                let stmt = self.statement()?;
-                Some(Statement::Label(name, Box::new(stmt)))
+                let stmt = Box::new(self.statement()?);
+                let span = start.start..stmt.span.end;
+                Some(Statement::new(StmtKind::Label(name, stmt), span))
             }
             Token::Goto => {
+                let start = self.peek_span()?;
                 self.next()?;
                 let name = self.ident()?.with_suffix(".goto_label").local();
                 self.consume(Token::Semicolon)?;
-                Some(Statement::Goto(name))
+                let span = start.start..self.prev_span()?.end;
+                Some(Statement::new(StmtKind::Goto(name), span))
             }
             Token::If => {
+                let start = self.peek_span()?;
                 self.next()?;
                 self.consume(Token::OpenParen)?;
                 let cond = self.expression(0)?;
                 self.consume(Token::CloseParen)?;
                 let then = Box::new(self.statement()?);
 
+                let mut end = then.span.end;
                 let mut else_ = None;
                 if self.consume_if_present(Token::Else).is_some() {
-                    else_ = Some(Box::new(self.statement()?));
+                    let else_stmt = self.statement()?;
+                    end = else_stmt.span.end;
+                    else_ = Some(Box::new(else_stmt));
                 }
 
-                Some(Statement::If { cond, then, else_ })
+                Some(Statement::new(
+                    StmtKind::If { cond, then, else_ },
+                    start.start..end,
+                ))
             }
             Token::Return => {
+                let start = self.peek_span()?;
                 self.next()?;
                 let return_val = self.expression(0)?;
                 self.consume(Token::Semicolon)?;
-                Some(Statement::Return(return_val))
+                let span = start.start..self.prev_span()?.end;
+                Some(Statement::new(StmtKind::Return(return_val), span))
             }
             Token::Semicolon => {
+                let span = self.peek_span()?;
                 self.next()?;
-                Some(Statement::Null)
+                Some(Statement::new(StmtKind::Null, span))
             }
             Token::Break => {
+                let span = self.peek_span()?;
                 self.next()?;
                 self.consume(Token::Semicolon)?;
-                Some(Statement::Break(Identifier::dummy()))
+                Some(Statement::new(StmtKind::Break(Identifier::dummy()), span))
             }
             Token::Continue => {
+                let span = self.peek_span()?;
                 self.next()?;
                 self.consume(Token::Semicolon)?;
-                Some(Statement::Continue(Identifier::dummy()))
+                Some(Statement::new(
+                    StmtKind::Continue(Identifier::dummy()),
+                    span,
+                ))
             }
             Token::While => {
+                let start = self.peek_span()?;
                 self.next()?;
                 self.consume(Token::OpenParen)?;
                 let cond = self.expression(0)?;
                 self.consume(Token::CloseParen)?;
-                let body = self.statement()?;
-                Some(Statement::While {
-                    cond,
-                    body: Box::new(body),
-                    label: Identifier::new("while"),
-                })
+                let body = Box::new(self.statement()?);
+                let span = start.start..body.span.end;
+                Some(Statement::new(
+                    StmtKind::While {
+                        cond,
+                        body,
+                        label: Identifier::new("while"),
+                    },
+                    span,
+                ))
             }
             Token::Do => {
+                let start = self.peek_span()?;
                 self.next()?;
-                let body = self.statement()?;
+                let body = Box::new(self.statement()?);
                 self.consume(Token::While)?;
                 self.consume(Token::OpenParen)?;
                 let cond = self.expression(0)?;
                 self.consume(Token::CloseParen)?;
                 self.consume(Token::Semicolon)?;
+                let span = start.start..self.prev_span()?.end;
 
-                Some(Statement::DoWhile {
-                    body: Box::new(body),
-                    cond,
-                    label: Identifier::new("do_while"),
-                })
+                Some(Statement::new(
+                    StmtKind::DoWhile {
+                        body,
+                        cond,
+                        label: Identifier::new("do_while"),
+                    },
+                    span,
+                ))
             }
             Token::For => {
+                let start = self.peek_span()?;
                 self.next()?;
                 self.consume(Token::OpenParen)?;
 
@@ -200,57 +236,89 @@ impl Parser {
                 self.consume(Token::Semicolon)?;
                 let post = self.expression_or_nothing();
                 self.consume(Token::CloseParen)?;
-                let body = self.statement()?;
+                let body = Box::new(self.statement()?);
+                let span = start.start..body.span.end;
 
-                Some(Statement::For {
-                    init,
-                    condition: condition,
-                    post: post,
-                    body: Box::new(body),
-                    label: Identifier::new("for"),
-                })
+                Some(Statement::new(
+                    StmtKind::For {
+                        init,
+                        condition,
+                        post,
+                        body,
+                        label: Identifier::new("for"),
+                    },
+                    span,
+                ))
             }
             Token::Switch => {
+                let start = self.peek_span()?;
                 self.next()?;
                 self.consume(Token::OpenParen)?;
                 let value = self.expression(0)?;
                 self.consume(Token::CloseParen)?;
-                let body = self.statement()?;
+                let body = Box::new(self.statement()?);
+                let span = start.start..body.span.end;
 
-                Some(Statement::Switch(Switch {
-                    value,
-                    label: Identifier::new("switch"),
-                    body: Box::new(body),
-                    case_set: HashSet::new(),
-                    cases: Vec::new(),
-                    default_case: None,
-                }))
+                Some(Statement::new(
+                    StmtKind::Switch(Switch {
+                        value,
+                        label: Identifier::new("switch"),
+                        body,
+                        case_set: HashSet::new(),
+                        cases: Vec::new(),
+                        default_case: None,
+                    }),
+                    span,
+                ))
             }
             Token::Case => {
+                let start = self.peek_span()?;
                 self.next()?;
-                self.next()?; // advance onto constant token, self.constant doesnt consume anything
+
+                if self.peek() != Some(&Token::ConstantInt) {
+                    let found = self.peek().copied().unwrap_or(Token::EndOfInput);
+                    let span = self.peek_span_or_eof();
+                    self.error(span, expected_msg(Token::ConstantInt, found));
+                    return None;
+                }
+                self.next()?;
                 let value = self.constant()?;
+
                 self.consume(Token::Colon)?;
-                let stmt = self.statement()?;
-                Some(Statement::Case {
-                    value,
-                    stmt: Box::new(stmt),
-                    label: Identifier::new("case"),
-                })
+                let header_end = self.prev_span()?.end;
+                let stmt = Box::new(self.statement()?);
+                let span = start.start..stmt.span.end;
+                Some(Statement::new(
+                    StmtKind::Case {
+                        value,
+                        label: Identifier::new("case"),
+                        header_span: start.start..header_end,
+                        stmt,
+                    },
+                    span,
+                ))
             }
             Token::Default => {
+                let start = self.peek_span()?;
                 self.next()?;
                 self.consume(Token::Colon)?;
-                let stmt = self.statement()?;
-                Some(Statement::DefaultCase {
-                    label: Identifier::new("default_case"),
-                    stmt: Box::new(stmt),
-                })
+                let header_end = self.prev_span()?.end;
+                let stmt = Box::new(self.statement()?);
+                let span = start.start..stmt.span.end;
+                Some(Statement::new(
+                    StmtKind::DefaultCase {
+                        label: Identifier::new("default_case"),
+                        header_span: start.start..header_end,
+                        stmt,
+                    },
+                    span,
+                ))
             }
             _ => {
                 let expr = self.expression(0)?;
                 self.consume(Token::Semicolon)?;
-                Some(Statement::Expression(expr))
+                let span = expr.span.clone();
+                Some(Statement::new(StmtKind::Expression(expr), span))
             }
         }
     }
@@ -289,7 +357,11 @@ impl Parser {
                 let mhs = self.expression(0)?;
                 self.consume(Token::Colon)?;
                 let rhs = self.expression(CONDITIONAL_PRECEDENCE)?;
-                lhs = Expression::Conditional(Box::new(lhs), Box::new(mhs), Box::new(rhs));
+                let span = lhs.span.start..rhs.span.end;
+                lhs = Expression::new(
+                    ExprKind::Conditional(Box::new(lhs), Box::new(mhs), Box::new(rhs)),
+                    span,
+                );
             } else if let Some(operator) = self.peek_binary_operator() {
                 if operator.precedence() < min_precedence {
                     break;
@@ -299,22 +371,30 @@ impl Parser {
 
                 if operator.is_compound_assign() {
                     let rhs = self.expression(operator.precedence())?;
-                    lhs = Expression::CompoundAssign {
-                        operator,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    };
+                    let span = lhs.span.start..rhs.span.end;
+                    lhs = Expression::new(
+                        ExprKind::CompoundAssign {
+                            operator,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        span,
+                    );
                 } else if operator.is_assign() {
                     let rhs = self.expression(operator.precedence())?;
-                    lhs = Expression::Assignment(Box::new(lhs), Box::new(rhs));
+                    let span = lhs.span.start..rhs.span.end;
+                    lhs = Expression::new(ExprKind::Assignment(Box::new(lhs), Box::new(rhs)), span);
                 } else {
                     let rhs = self.expression(operator.precedence() + 1)?;
-
-                    lhs = Expression::Binary {
-                        operator,
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    };
+                    let span = lhs.span.start..rhs.span.end;
+                    lhs = Expression::new(
+                        ExprKind::Binary {
+                            operator,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        },
+                        span,
+                    );
                 }
             } else {
                 break;
@@ -328,105 +408,100 @@ impl Parser {
         match self.next()? {
             Token::Ident => {
                 let span = self.current_spanned()?.span.clone();
-                let s = self.source[span].to_string();
-                self.postfix(Expression::Var(Identifier(s)))
+                let s = self.source[span.clone()].to_string();
+                let expr = Expression::new(ExprKind::Var(Identifier(s)), span);
+                self.postfix(expr)
             }
             Token::OpenParen => {
+                let open = self.current_spanned()?.span.start;
                 let expr = self.expression(0)?;
                 self.consume(Token::CloseParen)?;
-                self.postfix(expr)
+                let close = self.prev_span()?.end;
+                let parenthesized = Expression::new(expr.kind, open..close);
+                self.postfix(parenthesized)
             }
             Token::ConstantInt => {
                 // it doesnt make sense to have a postfix operator on a constant, but we look for it anyway,
                 // so that if this is done, we give a more useful error like "invalid lvalue", instead of "unexpected characters"
-                let expr = Expression::Constant(self.constant()?);
+                let span = self.current_spanned()?.span.clone();
+                let expr = Expression::new(ExprKind::Constant(self.constant()?), span);
                 self.postfix(expr)
             }
             Token::Hyphen => {
-                let expr = self.factor()?;
-                Some(Expression::Unary {
-                    operator: UnaryOperator::Negate,
-                    expr: Box::new(expr),
-                })
-            }
-            Token::Decrement => {
-                let expr = self.factor()?;
-                Some(Expression::Prefix(IncDec::Decrement, Box::new(expr)))
-            }
-            Token::Increment => {
-                let expr = self.factor()?;
-                Some(Expression::Prefix(IncDec::Increment, Box::new(expr)))
+                let start = self.current_spanned()?.span.start;
+                self.unary(UnaryOperator::Negate, start)
             }
             Token::Tilde => {
-                let expr = self.factor()?;
-                Some(Expression::Unary {
-                    operator: UnaryOperator::BitwiseNot,
-                    expr: Box::new(expr),
-                })
+                let start = self.current_spanned()?.span.start;
+                self.unary(UnaryOperator::BitwiseNot, start)
             }
             Token::Not => {
-                let expr = self.factor()?;
-                Some(Expression::Unary {
-                    operator: UnaryOperator::Not,
-                    expr: Box::new(expr),
-                })
+                let start = self.current_spanned()?.span.start;
+                self.unary(UnaryOperator::Not, start)
+            }
+            Token::Increment => {
+                let start = self.current_spanned()?.span.start;
+                self.prefix_inc_dec(IncDec::Increment, start)
+            }
+            Token::Decrement => {
+                let start = self.current_spanned()?.span.start;
+                self.prefix_inc_dec(IncDec::Decrement, start)
             }
             _ => {
-                let current = self.current_spanned();
-                self.errors.push(Error {
-                    span: current?.span.clone(),
-                    ty: ErrorType::UnexpectedToken {
-                        found: self.current()?.clone(),
-                    },
-                });
+                let found = self.current().copied().unwrap_or(Token::EndOfInput);
+                let span = self
+                    .current_spanned()
+                    .map(|t| t.span.clone())
+                    .unwrap_or_else(|| self.eof_span());
+                let message = if found == Token::EndOfInput {
+                    "unexpected end of input".to_string()
+                } else {
+                    format!("unexpected token '{found}'")
+                };
+                self.error(span, message);
 
                 None
             }
         }
     }
 
+    fn unary(&mut self, operator: UnaryOperator, start: usize) -> Option<Expression> {
+        let expr = Box::new(self.factor()?);
+        let span = start..expr.span.end;
+        Some(Expression::new(ExprKind::Unary { operator, expr }, span))
+    }
+
+    fn prefix_inc_dec(&mut self, op: IncDec, start: usize) -> Option<Expression> {
+        let expr = Box::new(self.factor()?);
+        let span = start..expr.span.end;
+        Some(Expression::new(ExprKind::Prefix(op, expr), span))
+    }
+
     fn postfix(&mut self, mut expr: Expression) -> Option<Expression> {
         loop {
-            match self.peek() {
-                Some(Token::Increment) => {
-                    self.next();
-                    expr = Expression::Postfix(IncDec::Increment, Box::new(expr));
-                }
-                Some(Token::Decrement) => {
-                    self.next();
-                    expr = Expression::Postfix(IncDec::Decrement, Box::new(expr));
-                }
+            let op = match self.peek() {
+                Some(Token::Increment) => IncDec::Increment,
+                Some(Token::Decrement) => IncDec::Decrement,
                 _ => break,
-            }
+            };
+
+            let end = self.peek_span()?.end;
+            self.next()?;
+            let span = expr.span.start..end;
+            expr = Expression::new(ExprKind::Postfix(op, Box::new(expr)), span);
         }
+
         Some(expr)
     }
 
-    /// doesnt consume any tokens
+    /// parses the constant at the current position without consuming anything
     pub fn constant(&mut self) -> Option<Constant> {
-        Some(Constant::Int(self.int()?))
-    }
+        let span = self.current_spanned()?.span.clone();
 
-    /// doesnt consume any tokens
-    pub fn int(&mut self) -> Option<i32> {
-        match self.current_spanned()? {
-            SpannedToken {
-                token: Token::ConstantInt,
-                span,
-            } => {
-                let value = self.source[span.clone()].parse::<i32>().ok()?;
-                Some(value)
-            }
-            _ => {
-                let current = self.current_spanned();
-                self.errors.push(Error {
-                    span: current?.span.clone(),
-                    ty: ErrorType::ExpectedToken {
-                        expected: Token::ConstantInt,
-                        found: self.current()?.clone(),
-                    },
-                });
-
+        match self.source[span.clone()].parse::<i32>() {
+            Ok(value) => Some(Constant::Int(value)),
+            Err(_) => {
+                self.error(span, "integer constant is too large to fit in an 'int'");
                 None
             }
         }
@@ -457,16 +532,10 @@ impl Parser {
 
     pub fn next(&mut self) -> Option<&Token> {
         if !self.is_at_end() {
-            let token = &self.tokens[self.i];
+            let token = &self.tokens[self.i].token;
             self.i += 1;
-            Some(&token.token)
+            Some(token)
         } else {
-            self.errors.push(Error {
-                ty: ErrorType::UnexpectedToken {
-                    found: Token::EndOfInput,
-                },
-                span: self.source.len()..self.source.len(),
-            });
             None
         }
     }
@@ -504,43 +573,30 @@ impl Parser {
     }
 
     pub fn consume_if_present(&mut self, token: Token) -> Option<()> {
-        if let Some(current) = self.peek() {
-            if *current == token {
-                self.next();
-                return Some(());
-            } else {
-            }
+        if self.peek() == Some(&token) {
+            self.next();
+            Some(())
+        } else {
+            None
         }
-
-        None
     }
 
     pub fn consume(&mut self, expected: Token) -> Option<()> {
-        if let Some(&found) = self.next() {
-            if found == expected {
+        match self.peek() {
+            Some(&found) if found == expected => {
+                self.i += 1;
                 Some(())
-            } else {
-                let span = self.tokens[self.i - 1].span.clone();
-                self.errors.push(Error {
-                    ty: ErrorType::ExpectedToken { expected, found },
-                    span,
-                });
+            }
+            Some(&found) => {
+                let span = self.peek_span()?;
+                self.error(span, expected_msg(expected, found));
                 None
             }
-        } else {
-            let span = if self.i > 0 {
-                self.tokens[self.i - 1].span.clone()
-            } else {
-                0..0
-            };
-            self.errors.push(Error {
-                ty: ErrorType::ExpectedToken {
-                    expected,
-                    found: Token::EndOfInput,
-                },
-                span,
-            });
-            None
+            None => {
+                let span = self.eof_span();
+                self.error(span, expected_msg(expected, Token::EndOfInput));
+                None
+            }
         }
     }
 
@@ -550,14 +606,22 @@ impl Parser {
     }
 }
 
-pub fn parse(source: String, tokens: Vec<SpannedToken>, file_name: &str) -> Option<Program> {
+pub fn parse(source: String, tokens: Vec<SpannedToken>) -> Result<Program, Vec<Diagnostic>> {
     let mut parser = Parser::new(source, tokens);
     let program = parser.parse();
 
-    if !parser.errors.is_empty() {
-        parser.print_errors(file_name);
-        std::process::exit(1);
+    match program {
+        Some(program) if parser.errors.is_empty() => Ok(program),
+        _ => {
+            if parser.errors.is_empty() {
+                let span = parser.eof_span();
+                parser.errors.push(Diagnostic::new(
+                    Stage::Parse,
+                    span,
+                    "unexpected end of input",
+                ));
+            }
+            Err(parser.errors)
+        }
     }
-
-    program
 }

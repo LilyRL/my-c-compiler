@@ -75,12 +75,9 @@ pub enum BinaryOperator {
     Mul,
     LeftShift,
     RightShift,
-    LogicalLeftShift,
-    LogicalRightShift,
     BitwiseAnd,
     BitwiseXor,
     BitwiseOr,
-    Equal,
     NotEqual,
     GreaterThan,
     GreaterEqual,
@@ -111,12 +108,14 @@ impl BinaryOperator {
             Self::Mul => "imull",
             Self::LeftShift => "sall",
             Self::RightShift => "sarl",
-            Self::LogicalLeftShift => "shll",
-            Self::LogicalRightShift => "shrl",
             Self::BitwiseAnd => "andl",
             Self::BitwiseXor => "xorl",
             Self::BitwiseOr => "orl",
-            _ => todo!(),
+            Self::NotEqual
+            | Self::GreaterThan
+            | Self::GreaterEqual
+            | Self::LessThan
+            | Self::LessEqual => unimplemented!(),
         }
     }
 
@@ -128,11 +127,12 @@ impl BinaryOperator {
             | Self::BitwiseAnd
             | Self::BitwiseXor
             | Self::BitwiseOr => 4,
-            Self::LeftShift
-            | Self::RightShift
-            | Self::LogicalLeftShift
-            | Self::LogicalRightShift => 1,
-            _ => todo!(),
+            Self::LeftShift | Self::RightShift => 1,
+            Self::NotEqual
+            | Self::GreaterThan
+            | Self::GreaterEqual
+            | Self::LessThan
+            | Self::LessEqual => unimplemented!(),
         }
     }
 

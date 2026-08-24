@@ -3,9 +3,10 @@ use std::{fmt::Display, ops::Range};
 use logos::Logos;
 use strum::EnumIs;
 
+use crate::diagnostics::{Diagnostic, Stage};
+
 #[derive(Logos, Debug, PartialEq, Copy, Clone, EnumIs)]
-#[logos(skip r"[ \t\n]+")]
-#[logos(error = String)]
+#[logos(skip r"[ \t\r\n]+")]
 pub enum Token {
     #[regex(r"[a-zA-Z_]\w*")]
     Ident,
@@ -128,29 +129,37 @@ pub struct SpannedToken {
     pub span: Range<usize>,
 }
 
-pub fn lex(source: &str) -> Option<Vec<SpannedToken>> {
-    let lexer = Token::lexer(source);
-
+pub fn lex(source: &str) -> Result<Vec<SpannedToken>, Vec<Diagnostic>> {
     let mut tokens = vec![];
-    for (token, span) in lexer.spanned() {
-        match token {
+    let mut errors = vec![];
+
+    for (result, span) in Token::lexer(source).spanned() {
+        match result {
             Ok(token) => tokens.push(SpannedToken { token, span }),
-            Err(e) => {
-                println!("lexer error at {:?}: {}", span, e);
-                return None;
+            Err(_) => {
+                let text: String = source[span.clone()]
+                    .chars()
+                    .map(|c| c.escape_debug().to_string())
+                    .collect();
+                errors.push(Diagnostic::new(
+                    Stage::Lex,
+                    span,
+                    format!("unexpected character '{text}'"),
+                ));
             }
         }
     }
 
     tokens.push(SpannedToken {
         token: Token::EndOfInput,
-        span: Range {
-            start: source.len(),
-            end: source.len(),
-        },
+        span: source.len()..source.len(),
     });
 
-    Some(tokens)
+    if errors.is_empty() {
+        Ok(tokens)
+    } else {
+        Err(errors)
+    }
 }
 
 impl Display for Token {
