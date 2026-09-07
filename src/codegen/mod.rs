@@ -8,11 +8,13 @@ pub const R10: Operand = Operand::Reg(Register::R10);
 pub const R11: Operand = Operand::Reg(Register::R11);
 
 pub fn transform(program: &mut Program) {
-    let bytes_required = replace_pseudoregisters(&mut program.0);
-    allocate_stack_space(&mut program.0, bytes_required);
-    rewrite_invalid_double_memory_instructions(&mut program.0);
-    rewrite_invalid_imul_memory_dst(&mut program.0);
-    rewrite_constant_idiv_operands(&mut program.0);
+    for function in &mut program.0 {
+        let bytes_required = replace_pseudoregisters(function);
+        allocate_stack_space(function, bytes_required);
+        rewrite_invalid_double_memory_instructions(function);
+        rewrite_invalid_imul_memory_dst(function);
+        rewrite_constant_idiv_operands(function);
+    }
 }
 
 /// returns the number of bytes to allocate for this function
@@ -55,6 +57,9 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition) -> u32 {
             Instruction::SetCC(_, operand) => {
                 process_operand(operand);
             }
+            Instruction::Push(operand) => {
+                process_operand(operand);
+            }
             _ => {}
         }
     }
@@ -62,8 +67,12 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition) -> u32 {
     bytes_allocated as u32
 }
 
+fn round_up_16(bytes: u32) -> u32 {
+    ((bytes / 16) + 1) * 16
+}
+
 pub fn allocate_stack_space(function: &mut FunctionDefinition, bytes_required: u32) {
-    let bytes_required = ((bytes_required / 16) + 1) * 16;
+    let bytes_required = round_up_16(bytes_required);
     function
         .instructions
         .insert(0, Instruction::AllocateStack(bytes_required));

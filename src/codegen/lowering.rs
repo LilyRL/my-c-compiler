@@ -1,14 +1,20 @@
+use crate::analysis::get_identifiers;
+
 use super::*;
 
 impl crate::codegen::data::Program {
     pub fn format(&self) -> String {
+        let inner = self
+            .0
+            .iter()
+            .map(|f| f.format())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
         #[cfg(not(target_os = "linux"))]
-        return self.0.format();
+        return inner;
         #[cfg(target_os = "linux")]
-        {
-            let inner = self.0.format();
-            format!("    .section .note.GNU-stack,\"\",@progbits\n    .text\n{inner}\n")
-        }
+        return format!("    .section .note.GNU-stack,\"\",@progbits\n    .text\n{inner}\n");
     }
 }
 
@@ -51,6 +57,7 @@ impl Instruction {
                 lines.push("    ret".to_string());
             }
             Self::AllocateStack(size) => lines.push(format!("    subq ${size}, %rsp")),
+            Self::DeallocateStack(size) => lines.push(format!("    addq ${size}, %rsp")),
             Self::Unary { operator, operand } => {
                 lines.push(format!("{} {}", operator.op_str(), operand.format(4)))
             }
@@ -91,6 +98,22 @@ impl Instruction {
                 lines.push(format!("{}:", label.0));
             }
             Self::Comment(c) => lines.push(format!("    # {}", c)),
+            Self::Call(name) => {
+                if get_identifiers().get(name).unwrap().defined {
+                    #[cfg(target_os = "macos")]
+                    lines.push(format!("    call _{}", name));
+                    #[cfg(target_os = "linux")]
+                    lines.push(format!("    call {}", name));
+                } else {
+                    #[cfg(target_os = "macos")]
+                    lines.push(format!("    call _{}", name));
+                    #[cfg(target_os = "linux")]
+                    lines.push(format!("    call {}@PLT", name));
+                }
+            }
+            Self::Push(op) => {
+                lines.push(format!("    pushq {}", op.format(8)));
+            }
         }
     }
 }
@@ -105,15 +128,33 @@ impl Operand {
                 (Register::Ax, 4) => "%eax".to_string(),
                 (Register::Ax, 8) => "%rax".to_string(),
 
+                (Register::Cx, 1) => "%cl".to_string(),
+                (Register::Cx, 2) => "%cx".to_string(),
+                (Register::Cx, 4) => "%ecx".to_string(),
+                (Register::Cx, 8) => "%rcx".to_string(),
+
                 (Register::Dx, 1) => "%dl".to_string(),
                 (Register::Dx, 2) => "%dx".to_string(),
                 (Register::Dx, 4) => "%edx".to_string(),
                 (Register::Dx, 8) => "%rdx".to_string(),
 
-                (Register::Cx, 1) => "%cl".to_string(),
-                (Register::Cx, 2) => "%cx".to_string(),
-                (Register::Cx, 4) => "%ecx".to_string(),
-                (Register::Cx, 8) => "%rcx".to_string(),
+                (Register::Di, 1) => "%dil".to_string(),
+                (Register::Di, 2) => "%di".to_string(),
+                (Register::Di, 4) => "%edi".to_string(),
+                (Register::Di, 8) => "%rdi".to_string(),
+
+                (Register::Si, 1) => "%sil".to_string(),
+                (Register::Si, 2) => "%si".to_string(),
+                (Register::Si, 4) => "%esi".to_string(),
+                (Register::Si, 8) => "%rsi".to_string(),
+
+                (Register::R8, 1) => "%r8b".to_string(),
+                (Register::R8, 4) => "%r8d".to_string(),
+                (Register::R8, 8) => "%r8".to_string(),
+
+                (Register::R9, 1) => "%r9b".to_string(),
+                (Register::R9, 4) => "%r9d".to_string(),
+                (Register::R9, 8) => "%r9".to_string(),
 
                 (Register::R10, 1) => "%r10b".to_string(),
                 (Register::R10, 4) => "%r10d".to_string(),

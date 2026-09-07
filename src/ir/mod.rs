@@ -31,6 +31,14 @@ impl Display for Instruction {
             }
             Self::Label(label) => write!(f, "{}:", label.0),
             Self::Comment(c) => write!(f, "\t# {}", c),
+            Self::FunctionCall { name, args, dst } => {
+                let args_str = args
+                    .iter()
+                    .map(|arg| arg.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "\t{} = {}({});", dst, name.0, args_str)
+            }
         }
     }
 }
@@ -46,7 +54,11 @@ impl Display for Value {
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        for func in self.0.iter() {
+            write!(f, "{}\n\n", func)?;
+        }
+
+        Ok(())
     }
 }
 

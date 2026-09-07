@@ -269,6 +269,7 @@ dependencies = [
  "clap",
  "logos",
  "rand",
+ "sge_global",
  "strum",
  "strum_macros",
 ]
@@ -336,6 +337,16 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "sge_global"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "544c37a3c2be320de796507cf610ca5b183113f80b0d09f86806e9cf7db1166e"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+]
 
 [[package]]
 name = "strsim"

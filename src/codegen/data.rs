@@ -1,7 +1,7 @@
 use crate::parser::Identifier;
 
 #[derive(Debug)]
-pub struct Program(pub FunctionDefinition);
+pub struct Program(pub Vec<FunctionDefinition>);
 
 #[derive(Debug)]
 pub struct FunctionDefinition {
@@ -32,6 +32,9 @@ pub enum Instruction {
     SetCC(CondCode, Operand),
     Label(Identifier),
     AllocateStack(u32),
+    DeallocateStack(u32),
+    Push(Operand),
+    Call(Identifier),
     Comment(&'static str),
     Ret,
 }
@@ -59,11 +62,15 @@ impl CondCode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Register {
     Ax,
-    Dx,
     Cx,
+    Dx,
+    Di,
+    Si,
+    R8,
+    R9,
     R10,
     R11,
 }

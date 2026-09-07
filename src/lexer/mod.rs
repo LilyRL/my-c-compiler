@@ -120,6 +120,8 @@ pub enum Token {
     Break,
     #[token("continue")]
     Continue,
+    #[token(",")]
+    Comma,
     EndOfInput,
 }
 
@@ -222,6 +224,7 @@ impl Display for Token {
             Token::Default => "default",
             Token::Break => "break",
             Token::Continue => "continue",
+            Token::Comma => ",",
         };
         write!(f, "{}", s)
     }

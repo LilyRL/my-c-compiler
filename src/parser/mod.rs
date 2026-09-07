@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Display;
 
 use crate::diagnostics::{Diagnostic, Span, Stage};
 use crate::lexer::{SpannedToken, Token};
@@ -17,7 +18,7 @@ pub struct Parser {
     i: usize,
 }
 
-fn expected_msg(expected: Token, found: Token) -> String {
+fn expected_msg(expected: impl Display, found: Token) -> String {
     if found == Token::EndOfInput {
         format!("expected {expected} but reached end of input")
     } else {
@@ -36,10 +37,12 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Option<Program> {
-        let function = self.function_definition()?;
-        self.consume(Token::EndOfInput)?;
+        let mut functions = vec![];
+        while self.peek().is_some_and(|&t| t != Token::EndOfInput) {
+            functions.push(self.function_declaration()?);
+        }
 
-        Some(Program(function))
+        Some(Program(functions))
     }
 
     fn error(&mut self, span: Span, message: impl Into<String>) {
@@ -61,17 +64,6 @@ impl Parser {
 
     fn peek_span_or_eof(&self) -> Span {
         self.peek_span().unwrap_or_else(|| self.eof_span())
-    }
-
-    pub fn function_definition(&mut self) -> Option<FunctionDefinition> {
-        self.consume(Token::Int)?;
-        let name = self.ident()?;
-        self.consume(Token::OpenParen)?;
-        self.consume_if_present(Token::Void);
-        self.consume(Token::CloseParen)?;
-        let block = self.block()?;
-
-        Some(FunctionDefinition { name, block })
     }
 
     pub fn block(&mut self) -> Option<Block> {
@@ -100,10 +92,51 @@ impl Parser {
         }
     }
 
-    pub fn declaration(&mut self) -> Option<Declaration> {
+    pub fn function_declaration(&mut self) -> Option<FunctionDeclaration> {
+        let start = self.peek_span()?;
+        self.consume_with_custom_expected_message(Token::Int, "function declaration")?;
+        let name_span = self.peek_span()?;
+        let name = self.ident()?;
+
+        self.consume(Token::OpenParen)?;
+        let args = self.param_list()?;
+        self.consume(Token::CloseParen)?;
+
+        let block = match self.peek()? {
+            Token::OpenBrace => Some(self.block()?),
+            Token::Semicolon => {
+                self.next()?;
+                None
+            }
+            _ => {
+                self.error(
+                    self.peek_span()?,
+                    format!(
+                        "Unexpected token {}. Expected function body or ;",
+                        self.peek().unwrap()
+                    ),
+                );
+
+                return None;
+            }
+        };
+
+        let span = start.start..self.prev_span()?.end;
+
+        Some(FunctionDeclaration {
+            name,
+            params: args,
+            body: block,
+            span,
+            name_span,
+        })
+    }
+
+    pub fn variable_declaration(&mut self) -> Option<VariableDeclaration> {
         let start = self.peek_span()?;
         self.consume(Token::Int)?;
         let name = self.ident()?;
+
         let mut init = None;
 
         if self.consume_if_present(Token::Assign).is_some() {
@@ -113,7 +146,82 @@ impl Parser {
         self.consume(Token::Semicolon)?;
         let span = start.start..self.prev_span()?.end;
 
-        Some(Declaration { name, init, span })
+        Some(VariableDeclaration { name, init, span })
+    }
+
+    pub fn declaration(&mut self) -> Option<Declaration> {
+        let start = self.i;
+
+        self.consume(Token::Int)?;
+        self.consume(Token::Ident)?;
+
+        match self.peek()? {
+            Token::Assign | Token::Semicolon => {
+                self.i = start;
+                self.variable_declaration().map(Declaration::Var)
+            }
+            Token::OpenParen => {
+                self.i = start;
+                self.function_declaration().map(Declaration::Func)
+            }
+            _ => {
+                let found = self.peek().copied().unwrap_or(Token::EndOfInput);
+                let span = self.peek_span_or_eof();
+                self.error(span, {
+                    let found = found;
+                    if found == Token::EndOfInput {
+                        format!("expected '=', ';' or '(' but reached end of input")
+                    } else {
+                        format!("expected = or ( but found '{found}'")
+                    }
+                });
+                None
+            }
+        }
+    }
+
+    pub fn param_list(&mut self) -> Option<Vec<FunctionParameter>> {
+        let consume_next = |s: &mut Self, args: &mut Vec<FunctionParameter>| -> Option<()> {
+            s.consume(Token::Int)?;
+            let span = s.peek_span()?;
+            let name = s.ident()?;
+            args.push(FunctionParameter { span, name });
+            Some(())
+        };
+
+        if self.peek()?.is_void() {
+            self.next()?;
+            Some(vec![])
+        } else {
+            let mut args = vec![];
+            consume_next(self, &mut args)?;
+
+            while self.peek().is_some_and(|t| !t.is_close_paren()) {
+                self.consume(Token::Comma)?;
+                consume_next(self, &mut args)?;
+            }
+
+            Some(args)
+        }
+    }
+
+    pub fn arguement_list(&mut self) -> Option<Vec<Expression>> {
+        if self.peek().is_some_and(|t| t.is_close_paren()) {
+            return Some(vec![]);
+        }
+
+        let mut args = vec![];
+
+        let expr = self.expression(0)?;
+        args.push(expr);
+
+        while self.peek().is_some_and(|t| !t.is_close_paren()) {
+            self.consume(Token::Comma)?;
+            let expr = self.expression(0)?;
+            args.push(expr);
+        }
+
+        Some(args)
     }
 
     pub fn statement(&mut self) -> Option<Statement> {
@@ -331,7 +439,7 @@ impl Parser {
         }
 
         if self.peek() == Some(&Token::Int) {
-            let decl = self.declaration()?;
+            let decl = self.variable_declaration()?;
             return Some(ForInit::Decl(decl));
         }
 
@@ -409,7 +517,25 @@ impl Parser {
             Token::Ident => {
                 let span = self.current_spanned()?.span.clone();
                 let s = self.source[span.clone()].to_string();
-                let expr = Expression::new(ExprKind::Var(Identifier(s)), span);
+
+                let expr;
+                if self.peek().is_some_and(|t| t.is_open_paren()) {
+                    self.next()?;
+                    let args = self.arguement_list()?;
+                    self.consume(Token::CloseParen)?;
+
+                    let span = span.start..self.prev_span()?.end;
+                    expr = Expression::new(
+                        ExprKind::FunctionCall {
+                            name: Identifier::new_raw(&s),
+                            args,
+                        },
+                        span,
+                    );
+                } else {
+                    expr = Expression::new(ExprKind::Var(Identifier::new_raw(&s)), span);
+                }
+
                 self.postfix(expr)
             }
             Token::OpenParen => {
@@ -456,7 +582,7 @@ impl Parser {
                 let message = if found == Token::EndOfInput {
                     "unexpected end of input".to_string()
                 } else {
-                    format!("unexpected token '{found}'")
+                    format!("unexpected token '{found}', expected expression")
                 };
                 self.error(span, message);
 
@@ -515,8 +641,8 @@ impl Parser {
                 token: Token::Ident,
                 span,
             } => {
-                let value = self.source[span.clone()].to_string();
-                Some(Identifier(value))
+                let value = &self.source[span.clone()];
+                Some(Identifier::new_raw(value))
             }
             _ => unreachable!(),
         }
@@ -595,6 +721,29 @@ impl Parser {
             None => {
                 let span = self.eof_span();
                 self.error(span, expected_msg(expected, Token::EndOfInput));
+                None
+            }
+        }
+    }
+
+    pub fn consume_with_custom_expected_message(
+        &mut self,
+        expected: Token,
+        msg: impl Display,
+    ) -> Option<()> {
+        match self.peek() {
+            Some(&found) if found == expected => {
+                self.i += 1;
+                Some(())
+            }
+            Some(&found) => {
+                let span = self.peek_span()?;
+                self.error(span, expected_msg(msg, found));
+                None
+            }
+            None => {
+                let span = self.eof_span();
+                self.error(span, expected_msg(msg, Token::EndOfInput));
                 None
             }
         }

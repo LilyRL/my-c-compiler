@@ -1,11 +1,12 @@
 use crate::parser::Identifier;
 
 #[derive(Debug)]
-pub struct Program(pub FunctionDefinition);
+pub struct Program(pub Vec<FunctionDefinition>);
 
 #[derive(Debug)]
 pub struct FunctionDefinition {
     pub name: Identifier,
+    pub params: Vec<Identifier>,
     pub body: Vec<Instruction>,
 }
 
@@ -38,6 +39,11 @@ pub enum Instruction {
     },
     Label(Identifier),
     Comment(&'static str),
+    FunctionCall {
+        name: Identifier,
+        args: Vec<Value>,
+        dst: Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]

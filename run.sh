@@ -2,4 +2,4 @@
 
 cargo run -- test.c --keep-intermediates
 ./test
-echo $?
+echo "return code: $?"

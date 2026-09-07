@@ -21,6 +21,14 @@ impl Display for Expression {
             ExprKind::Conditional(cond, if_true, if_false) => {
                 write!(f, "({} ? {} : {})", cond, if_true, if_false)
             }
+            ExprKind::FunctionCall { name, args } => {
+                let args_str = args
+                    .iter()
+                    .map(|arg| format!("{}", arg))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "{}({})", name.0, args_str)
+            }
         }
     }
 }

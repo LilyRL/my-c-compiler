@@ -2,6 +2,11 @@ use super::*;
 
 use crate::codegen::{self, CondCode, Operand, Register};
 
+const ARG_REGISTERS: [Register; 6] = {
+    use Register::*;
+    [Di, Si, Dx, Cx, R8, R9]
+};
+
 impl Value {
     pub fn lower(self) -> codegen::Operand {
         match self {
@@ -128,6 +133,65 @@ impl Instruction {
                 dst: dst.lower(),
             }),
             Self::Comment(c) => instructions.push(codegen::Instruction::Comment(c)),
+            Self::FunctionCall { name, args, dst } => {
+                let mut register_args = Vec::with_capacity(args.len().min(6));
+                let mut stack_args = Vec::with_capacity(args.len().saturating_sub(6));
+                for (i, arg) in args.into_iter().enumerate() {
+                    if i < 6 {
+                        register_args.push(arg);
+                    } else {
+                        stack_args.push(arg);
+                    }
+                }
+
+                // TODO: this assumes that all values are 32 bits, fine for now but always be on the lookout
+                let stack_padding = if stack_args.len().is_multiple_of(2) {
+                    8
+                } else {
+                    0
+                };
+
+                if stack_padding != 0 {
+                    instructions.push(codegen::Instruction::AllocateStack(stack_padding));
+                }
+
+                let bytes_to_remove = 8 * stack_args.len() as u32 + stack_padding;
+
+                for (i, tacky_arg) in register_args.into_iter().enumerate() {
+                    let r = ARG_REGISTERS[i];
+                    let assembly_arg = tacky_arg.lower();
+                    instructions.push(codegen::Instruction::Mov {
+                        src: assembly_arg,
+                        dst: Operand::Reg(r),
+                    });
+                }
+
+                for tacky_arg in stack_args.into_iter().rev() {
+                    let assembly_arg = tacky_arg.lower();
+                    if matches!(assembly_arg, Operand::Reg(_) | Operand::Imm(_)) {
+                        instructions.push(codegen::Instruction::Push(assembly_arg));
+                    } else {
+                        // stack operands can't be pushed directly
+                        instructions.push(codegen::Instruction::Mov {
+                            src: assembly_arg,
+                            dst: Operand::Reg(Register::Ax),
+                        });
+                        instructions.push(codegen::Instruction::Push(Operand::Reg(Register::Ax)));
+                    }
+                }
+
+                instructions.push(codegen::Instruction::Call(name));
+
+                if bytes_to_remove != 0 {
+                    instructions.push(codegen::Instruction::DeallocateStack(bytes_to_remove));
+                }
+
+                let dst = dst.lower();
+                instructions.push(codegen::Instruction::Mov {
+                    src: Operand::Reg(Register::Ax),
+                    dst,
+                });
+            }
         }
     }
 }
@@ -135,13 +199,30 @@ impl Instruction {
 impl FunctionDefinition {
     pub fn lower(self) -> codegen::FunctionDefinition {
         let mut instructions = vec![];
+        let FunctionDefinition { name, params, body } = self;
 
-        for instruction in self.body {
+        for (i, p) in params.into_iter().enumerate() {
+            if i < 6 {
+                let r = ARG_REGISTERS[i];
+                instructions.push(codegen::Instruction::Mov {
+                    src: codegen::Operand::Reg(r),
+                    dst: codegen::Operand::Pseudo(p),
+                });
+            } else {
+                let offset = 8 * (i as u32 - 6) + 16;
+                instructions.push(codegen::Instruction::Mov {
+                    src: codegen::Operand::Stack(offset as i32),
+                    dst: codegen::Operand::Pseudo(p),
+                });
+            }
+        }
+
+        for instruction in body {
             instruction.lower(&mut instructions);
         }
 
         codegen::FunctionDefinition {
-            name: self.name,
+            name: name,
             instructions,
         }
     }
@@ -149,7 +230,7 @@ impl FunctionDefinition {
 
 impl Program {
     pub fn lower(self) -> codegen::Program {
-        codegen::Program(self.0.lower())
+        codegen::Program(self.0.into_iter().map(|f| f.lower()).collect())
     }
 }
 

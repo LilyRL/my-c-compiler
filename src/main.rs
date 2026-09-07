@@ -23,7 +23,7 @@ struct Args {
     input_path: PathBuf,
 
     /// Path to output executable
-    #[arg(short = 'o', long)]
+    #[arg(short = 'o', long = "output")]
     output_path: Option<PathBuf>,
 
     /// Stop after lexing
@@ -53,6 +53,9 @@ struct Args {
     /// Keep intermediate .s files
     #[arg(long, default_value_t = false)]
     keep_intermediates: bool,
+
+    #[arg(short = 'c', default_value_t = false)]
+    generate_object: bool,
 }
 
 #[derive(Debug)]
@@ -68,15 +71,20 @@ struct Paths {
 impl Paths {
     fn new(args: &Args) -> Self {
         let input = args.input_path.clone();
-        let stem = input.file_stem().expect("Input file has no valid filename");
         let assembly = input.with_extension("s");
         let ir = input.with_extension("ir");
         let parsed_ast = input.with_extension("ast");
         let tokens = input.with_extension("tokens");
-        let output = args
-            .output_path
-            .clone()
-            .unwrap_or_else(|| input.parent().unwrap_or_else(|| Path::new("")).join(stem));
+
+        let output = if let Some(path) = args.output_path.clone() {
+            path
+        } else {
+            if args.generate_object {
+                input.with_extension("o")
+            } else {
+                input.with_extension("")
+            }
+        };
 
         Self {
             input,
@@ -110,17 +118,19 @@ fn compile_pipeline(
         return Ok(None);
     }
 
+    let semantic_errors = analysis::validate_program(&mut program);
+
     if args.keep_intermediates {
         let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
     }
 
-    let semantic_errors = analysis::validate_program(&mut program);
     if !semantic_errors.is_empty() {
         return Err(semantic_errors
             .iter()
             .map(|e| Diagnostic::new(Stage::Analysis, e.span().clone(), e.message()))
             .collect());
     }
+
     if args.validate {
         return Ok(None);
     }
@@ -183,11 +193,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    let assemble_status = Command::new("gcc")
-        .arg(&paths.assembly)
-        .args(["-o"])
-        .arg(&paths.output)
-        .status()?;
+    let mut assemble_cmd = Command::new("gcc");
+    assemble_cmd.arg(&paths.assembly);
+
+    if args.generate_object {
+        assemble_cmd.arg("-c");
+    }
+
+    assemble_cmd.args(["-o"]).arg(&paths.output);
+
+    let assemble_status = assemble_cmd.status()?;
 
     if !args.keep_intermediates {
         let _ = fs::remove_file(&paths.assembly);

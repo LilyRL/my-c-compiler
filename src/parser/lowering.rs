@@ -4,22 +4,29 @@ use ir::{Instruction, Value};
 
 impl Program {
     pub fn lower(self) -> ir::Program {
-        ir::Program(self.0.lower())
+        let functions = self
+            .0
+            .into_iter()
+            .flat_map(|f| f.lower())
+            .collect::<Vec<_>>();
+
+        ir::Program(functions)
     }
 }
 
-impl FunctionDefinition {
-    pub fn lower(self) -> ir::FunctionDefinition {
+impl FunctionDeclaration {
+    pub fn lower(self) -> Option<ir::FunctionDefinition> {
         let mut instructions = Vec::new();
 
-        for statement in self.block {
+        for statement in self.body? {
             statement.lower(&mut instructions);
         }
 
-        ir::FunctionDefinition {
+        Some(ir::FunctionDefinition {
+            params: self.params.into_iter().map(|p| p.name).collect(),
             name: self.name,
             body: instructions,
-        }
+        })
     }
 }
 
@@ -28,6 +35,15 @@ impl BlockItem {
         match self {
             Self::Stmt(stmt) => stmt.lower(instructions),
             Self::Decl(decl) => decl.lower(instructions),
+        }
+    }
+}
+
+impl Declaration {
+    pub fn lower(self, instructions: &mut Vec<Instruction>) {
+        match self {
+            Self::Func(func) => {}
+            Self::Var(var) => var.lower(instructions),
         }
     }
 }
@@ -192,7 +208,7 @@ impl Statement {
     }
 }
 
-impl Declaration {
+impl VariableDeclaration {
     pub fn lower(self, instructions: &mut Vec<Instruction>) {
         if let Some(init) = self.init {
             let out = init.lower(instructions);
@@ -420,6 +436,18 @@ impl Expression {
                 });
 
                 instructions.push(Instruction::Label(end_label));
+
+                result
+            }
+            ExprKind::FunctionCall { name, args } => {
+                let args: Vec<_> = args.into_iter().map(|a| a.lower(instructions)).collect();
+                let result = Value::Var(Identifier::new(format!("{}_result", name.1)));
+
+                instructions.push(Instruction::FunctionCall {
+                    name,
+                    args,
+                    dst: result.clone(),
+                });
 
                 result
             }
