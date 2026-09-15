@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
 use crate::{
-    analysis::errors::SemanticError,
+    diagnostics::Diagnostics,
     parser::{BlockItem, Program, StmtKind},
 };
 
 pub fn rename_all_gotos(program: &mut Program) {
-    for func in &mut program.0 {
+    for func in program.functions_mut() {
         if let Some(body) = &mut func.body {
             for item in body {
                 match item {
@@ -28,11 +28,8 @@ pub fn rename_all_gotos(program: &mut Program) {
     }
 }
 
-pub fn check_if_all_gotos_point_somewhere_valid(
-    program: &Program,
-    errors: &mut Vec<SemanticError>,
-) {
-    for func in &program.0 {
+pub fn check_if_all_gotos_point_somewhere_valid(program: &Program, diagnostics: &mut Diagnostics) {
+    for func in program.functions() {
         if let Some(body) = &func.body {
             let mut labels = HashSet::new();
 
@@ -40,14 +37,14 @@ pub fn check_if_all_gotos_point_somewhere_valid(
                 match item {
                     BlockItem::Stmt(s) => {
                         s.process_inner_statements(
-                            &mut (&mut labels, &mut *errors),
-                            &|stmt, (labels, errors)| match &stmt.kind {
+                            &mut (&mut labels, &mut *diagnostics),
+                            &|stmt, (labels, diagnostics)| match &stmt.kind {
                                 StmtKind::Label(i, _) => {
                                     if labels.contains(i) {
-                                        errors.push(SemanticError::DuplicateLabel {
-                                            span: stmt.span.clone(),
-                                            name: i.1.clone(),
-                                        });
+                                        diagnostics.analysis_error(
+                                            stmt.span.clone(),
+                                            format!("duplicate label '{}'", i.1),
+                                        );
                                     } else {
                                         labels.insert(i.clone());
                                     }
@@ -63,13 +60,15 @@ pub fn check_if_all_gotos_point_somewhere_valid(
             for item in body {
                 match item {
                     BlockItem::Stmt(s) => {
-                        s.process_inner_statements(errors, &|stmt, errors| match &stmt.kind {
+                        s.process_inner_statements(diagnostics, &|stmt, diagnostics| match &stmt
+                            .kind
+                        {
                             StmtKind::Goto(i) => {
                                 if !labels.contains(i) {
-                                    errors.push(SemanticError::UndeclaredGotoTarget {
-                                        span: stmt.span.clone(),
-                                        name: i.1.clone(),
-                                    });
+                                    diagnostics.analysis_error(
+                                        stmt.span.clone(),
+                                        format!("undeclared goto target '{}'", i.1),
+                                    );
                                 }
                             }
                             _ => (),

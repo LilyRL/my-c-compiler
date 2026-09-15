@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    analysis::errors::SemanticError,
+    diagnostics::Diagnostics,
     parser::{BlockItem, Constant, Identifier, Program, Statement, StmtKind, SwitchCase},
 };
 
@@ -12,40 +12,42 @@ struct SwitchCaseData<'a> {
     default_case: &'a mut Option<Identifier>,
 }
 
-pub fn collect_all_switch_cases(program: &mut Program, errors: &mut Vec<SemanticError>) {
-    for function in &mut program.0 {
+pub fn collect_all_switch_cases(program: &mut Program, diagnostics: &mut Diagnostics) {
+    for function in program.functions_mut() {
         if let Some(block) = &mut function.body {
             for block_item in block.iter_mut() {
                 if let BlockItem::Stmt(stmt) = block_item {
-                    find_and_collect_switch_cases(stmt, errors);
+                    find_and_collect_switch_cases(stmt, diagnostics);
                 }
             }
         }
     }
 }
 
-fn find_and_collect_switch_cases(stmt: &mut Statement, errors: &mut Vec<SemanticError>) {
+fn find_and_collect_switch_cases(stmt: &mut Statement, diagnostics: &mut Diagnostics) {
     match &mut stmt.kind {
-        StmtKind::Case { header_span, .. } | StmtKind::DefaultCase { header_span, .. } => errors
-            .push(SemanticError::CaseOutsideSwitch {
-                span: header_span.clone(),
-            }),
+        StmtKind::Case { header_span, .. } | StmtKind::DefaultCase { header_span, .. } => {
+            diagnostics.analysis_error(
+                header_span.clone(),
+                "'case'/'default' label outside of a switch",
+            )
+        }
         StmtKind::If { then, else_, .. } => {
-            find_and_collect_switch_cases(then, errors);
+            find_and_collect_switch_cases(then, diagnostics);
             if let Some(else_) = else_ {
-                find_and_collect_switch_cases(else_, errors);
+                find_and_collect_switch_cases(else_, diagnostics);
             }
         }
         StmtKind::While { body, .. }
         | StmtKind::DoWhile { body, .. }
         | StmtKind::For { body, .. }
         | StmtKind::Label(_, body) => {
-            find_and_collect_switch_cases(body, errors);
+            find_and_collect_switch_cases(body, diagnostics);
         }
         StmtKind::Compound(items) => {
             for item in items {
                 if let BlockItem::Stmt(stmt) = item {
-                    find_and_collect_switch_cases(stmt, errors);
+                    find_and_collect_switch_cases(stmt, diagnostics);
                 }
             }
         }
@@ -55,7 +57,7 @@ fn find_and_collect_switch_cases(stmt: &mut Statement, errors: &mut Vec<Semantic
                 case_set: &mut s.case_set,
                 default_case: &mut s.default_case,
             };
-            collect_switch_cases(&mut s.body, &mut data, errors);
+            collect_switch_cases(&mut s.body, &mut data, diagnostics);
         }
         _ => {}
     }
@@ -64,25 +66,25 @@ fn find_and_collect_switch_cases(stmt: &mut Statement, errors: &mut Vec<Semantic
 fn collect_switch_cases(
     stmt: &mut Statement,
     data: &mut SwitchCaseData<'_>,
-    errors: &mut Vec<SemanticError>,
+    diagnostics: &mut Diagnostics,
 ) {
     match &mut stmt.kind {
         StmtKind::If { then, else_, .. } => {
-            collect_switch_cases(then, data, errors);
+            collect_switch_cases(then, data, diagnostics);
             if let Some(else_) = else_ {
-                collect_switch_cases(else_, data, errors);
+                collect_switch_cases(else_, data, diagnostics);
             }
         }
         StmtKind::While { body, .. }
         | StmtKind::DoWhile { body, .. }
         | StmtKind::For { body, .. }
         | StmtKind::Label(_, body) => {
-            collect_switch_cases(body, data, errors);
+            collect_switch_cases(body, data, diagnostics);
         }
         StmtKind::Compound(items) => {
             for item in items {
                 if let BlockItem::Stmt(stmt) = item {
-                    collect_switch_cases(stmt, data, errors);
+                    collect_switch_cases(stmt, data, diagnostics);
                 }
             }
         }
@@ -92,7 +94,7 @@ fn collect_switch_cases(
                 case_set: &mut s.case_set,
                 default_case: &mut s.default_case,
             };
-            collect_switch_cases(&mut s.body, &mut data, errors);
+            collect_switch_cases(&mut s.body, &mut data, diagnostics);
         }
         StmtKind::Case {
             value,
@@ -101,15 +103,15 @@ fn collect_switch_cases(
             stmt,
         } => {
             if data.case_set.contains(value) {
-                errors.push(SemanticError::DuplicateSwitchCase {
-                    value: value.clone(),
-                    span: header_span.clone(),
-                });
+                diagnostics.analysis_error(
+                    header_span.clone(),
+                    format!("duplicate case value {}", value.clone().i32()),
+                );
             }
 
             data.case_set.insert(value.clone());
             data.cases.push((label.clone(), value.clone()));
-            collect_switch_cases(stmt, data, errors);
+            collect_switch_cases(stmt, data, diagnostics);
         }
         StmtKind::DefaultCase {
             label,
@@ -117,14 +119,15 @@ fn collect_switch_cases(
             stmt,
         } => {
             if data.default_case.is_some() {
-                errors.push(SemanticError::DuplicateDefaultSwitchCase {
-                    span: header_span.clone(),
-                });
+                diagnostics.analysis_error(
+                    header_span.clone(),
+                    "multiple 'default' cases in one switch",
+                );
             } else {
                 *data.default_case = Some(label.clone());
             }
 
-            collect_switch_cases(stmt, data, errors);
+            collect_switch_cases(stmt, data, diagnostics);
         }
         _ => {}
     }

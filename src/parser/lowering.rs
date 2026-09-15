@@ -1,22 +1,52 @@
 use super::*;
-use crate::ir;
+use crate::{
+    analysis::{IdentifierAttributes, InitialValue, get_symbols},
+    ir::{self, StaticVariable, TopLevel},
+};
 use ir::{Instruction, Value};
 
 impl Program {
     pub fn lower(self) -> ir::Program {
-        let functions = self
+        let mut definitions = self
             .0
             .into_iter()
-            .flat_map(|f| f.lower())
+            .flat_map(|d| match d {
+                Declaration::Func(f) => f.lower().map(|f| TopLevel::F(f)),
+                _ => None,
+            })
             .collect::<Vec<_>>();
 
-        ir::Program(functions)
+        for (name, entry) in get_symbols().iter() {
+            match &entry.attributes {
+                IdentifierAttributes::Static { init, global } => match init {
+                    InitialValue::Constant(i) => definitions.push(TopLevel::V(StaticVariable {
+                        name: name.clone(),
+                        global: *global,
+                        init: *i,
+                    })),
+                    InitialValue::Tentitive => definitions.push(TopLevel::V(StaticVariable {
+                        name: name.clone(),
+                        global: *global,
+                        init: Constant::Int(0),
+                    })),
+                    InitialValue::None => (),
+                },
+                _ => (),
+            }
+        }
+
+        ir::Program(definitions)
     }
 }
 
 impl FunctionDeclaration {
     pub fn lower(self) -> Option<ir::FunctionDefinition> {
         let mut instructions = Vec::new();
+
+        let global = get_symbols()
+            .get(&self.name)
+            .map(|s| s.attributes.global())
+            .unwrap_or_else(|| !self.storage_class.is_static());
 
         for statement in self.body? {
             statement.lower(&mut instructions);
@@ -26,6 +56,7 @@ impl FunctionDeclaration {
             params: self.params.into_iter().map(|p| p.name).collect(),
             name: self.name,
             body: instructions,
+            global,
         })
     }
 }
@@ -42,7 +73,7 @@ impl BlockItem {
 impl Declaration {
     pub fn lower(self, instructions: &mut Vec<Instruction>) {
         match self {
-            Self::Func(func) => {}
+            Self::Func(_) => {}
             Self::Var(var) => var.lower(instructions),
         }
     }
@@ -210,7 +241,9 @@ impl Statement {
 
 impl VariableDeclaration {
     pub fn lower(self, instructions: &mut Vec<Instruction>) {
-        if let Some(init) = self.init {
+        if let Some(init) = self.init
+            && self.storage_class.is_none()
+        {
             let out = init.lower(instructions);
             let copy = Instruction::Copy {
                 src: out,

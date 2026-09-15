@@ -1,12 +1,26 @@
-use crate::parser::Identifier;
+use crate::parser::{Constant, Identifier};
 
 #[derive(Debug)]
-pub struct Program(pub Vec<FunctionDefinition>);
+pub struct Program(pub Vec<TopLevel>);
+
+#[derive(Debug)]
+pub enum TopLevel {
+    F(FunctionDefinition),
+    V(StaticVariable),
+}
 
 #[derive(Debug)]
 pub struct FunctionDefinition {
     pub name: Identifier,
     pub instructions: Vec<Instruction>,
+    pub global: bool,
+}
+
+#[derive(Debug)]
+pub struct StaticVariable {
+    pub name: Identifier,
+    pub global: bool,
+    pub init: Constant,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +119,7 @@ pub enum Operand {
     Reg(Register),
     Pseudo(Identifier),
     Stack(i32),
+    Data(Identifier),
 }
 
 impl BinaryOperator {
@@ -178,12 +193,9 @@ impl UnaryOperator {
 }
 
 impl Operand {
-    /// Returns `true` if the operand is [`Stack`].
-    ///
-    /// [`Stack`]: Operand::Stack
     #[must_use]
-    pub fn is_stack(&self) -> bool {
-        matches!(self, Self::Stack(..))
+    pub fn is_memory(&self) -> bool {
+        matches!(self, Self::Stack(_) | Self::Data(_))
     }
 
     pub fn is_constant(&self) -> bool {

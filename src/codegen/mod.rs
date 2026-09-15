@@ -4,16 +4,20 @@ use std::collections::BTreeMap;
 
 pub use data::*;
 
+use crate::analysis::get_symbols;
+
 pub const R10: Operand = Operand::Reg(Register::R10);
 pub const R11: Operand = Operand::Reg(Register::R11);
 
 pub fn transform(program: &mut Program) {
-    for function in &mut program.0 {
-        let bytes_required = replace_pseudoregisters(function);
-        allocate_stack_space(function, bytes_required);
-        rewrite_invalid_double_memory_instructions(function);
-        rewrite_invalid_imul_memory_dst(function);
-        rewrite_constant_idiv_operands(function);
+    for toplevel in &mut program.0 {
+        if let TopLevel::F(function) = toplevel {
+            let bytes_required = replace_pseudoregisters(function);
+            allocate_stack_space(function, bytes_required);
+            rewrite_invalid_double_memory_instructions(function);
+            rewrite_invalid_imul_memory_dst(function);
+            rewrite_constant_idiv_operands(function);
+        }
     }
 }
 
@@ -26,6 +30,10 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition) -> u32 {
         if let Operand::Pseudo(ident) = operand {
             if let Some(offset) = map.get(&ident.0) {
                 *operand = Operand::Stack(*offset);
+            } else if let Some(data) = get_symbols().get(&ident)
+                && data.attributes.is_static()
+            {
+                *operand = Operand::Data(ident.clone());
             } else {
                 bytes_allocated += 4;
                 map.insert(ident.0.clone(), -bytes_allocated);
@@ -83,7 +91,7 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
 
     while i < function.instructions.len() {
         match function.instructions[i].clone() {
-            Instruction::Mov { src, dst } if src.is_stack() && dst.is_stack() => {
+            Instruction::Mov { src, dst } if src.is_memory() && dst.is_memory() => {
                 function.instructions[i] = Instruction::Mov { src: R10, dst };
                 function
                     .instructions
@@ -91,7 +99,7 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
                 i += 1;
             }
             Instruction::Binary { operator, src, dst }
-                if operator.cant_have_double_memory() && src.is_stack() && dst.is_stack() =>
+                if operator.cant_have_double_memory() && src.is_memory() && dst.is_memory() =>
             {
                 function.instructions[i] = Instruction::Binary {
                     operator,
@@ -103,7 +111,9 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
                     .insert(i, Instruction::Mov { src, dst: R10 });
                 i += 1;
             }
-            Instruction::Binary { operator, src, dst } if operator.is_shift() && src.is_stack() => {
+            Instruction::Binary { operator, src, dst }
+                if operator.is_shift() && src.is_memory() =>
+            {
                 // cnt must be in %ecx
                 function.instructions[i] = Instruction::Binary {
                     operator,
@@ -119,7 +129,7 @@ pub fn rewrite_invalid_double_memory_instructions(function: &mut FunctionDefinit
                 );
                 i += 1;
             }
-            Instruction::Cmp(a, b) if a.is_stack() && b.is_stack() => {
+            Instruction::Cmp(a, b) if a.is_memory() && b.is_memory() => {
                 function.instructions[i] = Instruction::Cmp(R10, b);
                 function
                     .instructions
@@ -145,7 +155,7 @@ pub fn rewrite_invalid_imul_memory_dst(function: &mut FunctionDefinition) {
     while i < function.instructions.len() {
         match function.instructions[i].clone() {
             Instruction::Binary { operator, src, dst } if operator.is_mult() => {
-                if dst.is_stack() {
+                if dst.is_memory() {
                     function.instructions[i] = Instruction::Mov {
                         src: dst.clone(),
                         dst: R11,

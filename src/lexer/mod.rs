@@ -3,7 +3,10 @@ use std::{fmt::Display, ops::Range};
 use logos::Logos;
 use strum::EnumIs;
 
-use crate::diagnostics::{Diagnostic, Stage};
+use crate::{
+    diagnostics::{Diagnostic, Stage},
+    parser::Specifier,
+};
 
 #[derive(Logos, Debug, PartialEq, Copy, Clone, EnumIs)]
 #[logos(skip r"[ \t\r\n]+")]
@@ -122,6 +125,10 @@ pub enum Token {
     Continue,
     #[token(",")]
     Comma,
+    #[token("static")]
+    Static,
+    #[token("extern")]
+    Extern,
     EndOfInput,
 }
 
@@ -161,6 +168,21 @@ pub fn lex(source: &str) -> Result<Vec<SpannedToken>, Vec<Diagnostic>> {
         Ok(tokens)
     } else {
         Err(errors)
+    }
+}
+
+impl Token {
+    pub fn is_specifier(self) -> bool {
+        matches!(self, Token::Int | Token::Static | Token::Extern)
+    }
+
+    pub fn specifier(self) -> Option<Specifier> {
+        match self {
+            Token::Int => Some(Specifier::Int),
+            Token::Static => Some(Specifier::Static),
+            Token::Extern => Some(Specifier::Extern),
+            _ => None,
+        }
     }
 }
 
@@ -225,6 +247,8 @@ impl Display for Token {
             Token::Break => "break",
             Token::Continue => "continue",
             Token::Comma => ",",
+            Token::Static => "static",
+            Token::Extern => "extern",
         };
         write!(f, "{}", s)
     }

@@ -4,6 +4,8 @@ mod lowering;
 
 use std::fmt::Display;
 
+use crate::parser::Constant;
+
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -59,6 +61,29 @@ impl Display for Program {
         }
 
         Ok(())
+    }
+}
+
+impl Display for TopLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::F(func) => write!(f, "{}", func),
+            Self::V(var) => write!(f, "{}", var),
+        }
+    }
+}
+
+impl Display for StaticVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "static {} = {};", self.name.0, self.init)
+    }
+}
+
+impl Display for Constant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int(i) => write!(f, "{}", i),
+        }
     }
 }
 

@@ -1,10 +1,28 @@
 use std::{collections::HashSet, fmt::Display};
 
+use strum::EnumIs;
+
 use super::operators::{BinaryOperator, IncDec, UnaryOperator};
-use crate::diagnostics::Span;
+use crate::{analysis::Type, diagnostics::Span};
 
 #[derive(Debug)]
-pub struct Program(pub Vec<FunctionDeclaration>);
+pub struct Program(pub Vec<Declaration>);
+
+impl Program {
+    pub fn functions(&self) -> impl Iterator<Item = &FunctionDeclaration> {
+        self.0.iter().filter_map(|decl| match decl {
+            Declaration::Func(func) => Some(func),
+            _ => None,
+        })
+    }
+
+    pub fn functions_mut(&mut self) -> impl Iterator<Item = &mut FunctionDeclaration> {
+        self.0.iter_mut().filter_map(|decl| match decl {
+            Declaration::Func(func) => Some(func),
+            _ => None,
+        })
+    }
+}
 
 pub type Block = Vec<BlockItem>;
 
@@ -15,6 +33,31 @@ pub struct FunctionDeclaration {
     pub body: Option<Block>,
     pub span: Span,
     pub name_span: Span,
+    pub storage_class: StorageClass,
+}
+
+#[derive(Debug)]
+pub enum Specifier {
+    Int,
+    Static,
+    Extern,
+}
+
+impl Specifier {
+    pub fn ty(&self) -> Type {
+        match self {
+            Specifier::Int => Type::Int,
+            _ => panic!(),
+        }
+    }
+
+    pub fn storage_class(&self) -> StorageClass {
+        match self {
+            Specifier::Static => StorageClass::Static,
+            Specifier::Extern => StorageClass::Extern,
+            _ => StorageClass::None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -28,12 +71,20 @@ pub struct VariableDeclaration {
     pub name: Identifier,
     pub init: Option<Expression>,
     pub span: Span,
+    pub storage_class: StorageClass,
 }
 
 #[derive(Debug)]
 pub enum Declaration {
     Func(FunctionDeclaration),
     Var(VariableDeclaration),
+}
+
+#[derive(Debug, EnumIs)]
+pub enum StorageClass {
+    Static,
+    Extern,
+    None,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, PartialOrd, Ord, Eq)]
@@ -228,7 +279,7 @@ impl Expression {
     }
 }
 
-#[derive(Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Clone)]
+#[derive(Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Constant {
     Int(i32),
 }
@@ -397,68 +448,6 @@ impl Statement {
                 | StmtKind::Goto(_)
                 | StmtKind::Break(_)
                 | StmtKind::Continue(_) => {}
-            }
-        }
-    }
-
-    pub fn process_inner_expressions<S, F: Fn(&Expression, &mut S)>(&self, state: &mut S, f: &F) {
-        let mut stack: Vec<&Statement> = vec![self];
-        while let Some(stmt) = stack.pop() {
-            match &stmt.kind {
-                StmtKind::Return(expr) | StmtKind::Expression(expr) => {
-                    expr.process_inner_expressions(state, f)
-                }
-                StmtKind::If { cond, then, else_ } => {
-                    cond.process_inner_expressions(state, f);
-                    stack.push(then);
-                    if let Some(else_) = else_ {
-                        stack.push(else_);
-                    }
-                }
-                StmtKind::While { cond, body, .. } => {
-                    cond.process_inner_expressions(state, f);
-                    stack.push(body);
-                }
-                StmtKind::DoWhile { body, cond, .. } => {
-                    stack.push(body);
-                    cond.process_inner_expressions(state, f);
-                }
-                StmtKind::For {
-                    init,
-                    condition,
-                    post,
-                    body,
-                    ..
-                } => {
-                    if let ForInit::Expr(expr) = init {
-                        expr.process_inner_expressions(state, f);
-                    }
-                    if let Some(condition) = condition {
-                        condition.process_inner_expressions(state, f);
-                    }
-                    if let Some(post) = post {
-                        post.process_inner_expressions(state, f);
-                    }
-                    stack.push(body);
-                }
-                StmtKind::Switch(switch) => {
-                    switch.value.process_inner_expressions(state, f);
-                    stack.push(&switch.body);
-                }
-                StmtKind::Case { stmt, .. }
-                | StmtKind::DefaultCase { stmt, .. }
-                | StmtKind::Label(_, stmt) => {
-                    stack.push(stmt);
-                }
-                StmtKind::Compound(block) => {
-                    for item in block.iter().rev() {
-                        if let BlockItem::Stmt(stmt) = item {
-                            stack.push(stmt);
-                        }
-                    }
-                }
-                StmtKind::Null | StmtKind::Goto(_) | StmtKind::Break(_) | StmtKind::Continue(_) => {
-                }
             }
         }
     }

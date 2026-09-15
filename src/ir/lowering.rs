@@ -146,9 +146,9 @@ impl Instruction {
 
                 // TODO: this assumes that all values are 32 bits, fine for now but always be on the lookout
                 let stack_padding = if stack_args.len().is_multiple_of(2) {
-                    8
-                } else {
                     0
+                } else {
+                    8
                 };
 
                 if stack_padding != 0 {
@@ -199,7 +199,12 @@ impl Instruction {
 impl FunctionDefinition {
     pub fn lower(self) -> codegen::FunctionDefinition {
         let mut instructions = vec![];
-        let FunctionDefinition { name, params, body } = self;
+        let FunctionDefinition {
+            name,
+            params,
+            body,
+            global,
+        } = self;
 
         for (i, p) in params.into_iter().enumerate() {
             if i < 6 {
@@ -224,6 +229,17 @@ impl FunctionDefinition {
         codegen::FunctionDefinition {
             name: name,
             instructions,
+            global,
+        }
+    }
+}
+
+impl StaticVariable {
+    pub fn lower(self) -> codegen::StaticVariable {
+        codegen::StaticVariable {
+            name: self.name,
+            global: self.global,
+            init: self.init,
         }
     }
 }
@@ -231,6 +247,15 @@ impl FunctionDefinition {
 impl Program {
     pub fn lower(self) -> codegen::Program {
         codegen::Program(self.0.into_iter().map(|f| f.lower()).collect())
+    }
+}
+
+impl TopLevel {
+    pub fn lower(self) -> codegen::TopLevel {
+        match self {
+            Self::F(f) => codegen::TopLevel::F(f.lower()),
+            Self::V(v) => codegen::TopLevel::V(v.lower()),
+        }
     }
 }
 

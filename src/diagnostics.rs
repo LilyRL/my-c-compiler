@@ -21,6 +21,42 @@ impl fmt::Display for Stage {
     }
 }
 
+pub struct Diagnostics {
+    pub vec: Vec<Diagnostic>,
+}
+
+#[allow(unused)]
+impl Diagnostics {
+    pub fn new() -> Self {
+        Self { vec: Vec::new() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.vec.is_empty()
+    }
+
+    pub fn push(&mut self, diagnostic: Diagnostic) {
+        self.vec.push(diagnostic);
+    }
+
+    pub fn add(&mut self, stage: Stage, span: Span, message: impl ToString) {
+        self.vec
+            .push(Diagnostic::new(stage, span, message.to_string()));
+    }
+
+    pub fn lexing_error(&mut self, span: Span, message: impl ToString) {
+        self.add(Stage::Lex, span, message);
+    }
+
+    pub fn parsing_error(&mut self, span: Span, message: impl ToString) {
+        self.add(Stage::Parse, span, message);
+    }
+
+    pub fn analysis_error(&mut self, span: Span, message: impl ToString) {
+        self.add(Stage::Analysis, span, message);
+    }
+}
+
 #[derive(Debug)]
 pub struct Diagnostic {
     pub stage: Stage,

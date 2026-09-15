@@ -32,16 +32,65 @@ impl FunctionDefinition {
         }
 
         let instructions = lines.join("\n");
+        let global_directive = if self.global {
+            &format!(".globl {name}")
+        } else {
+            ""
+        };
 
         format!(
             r#"
-    .type main, @function
-    .globl {name}
+    .type {name}, @function
+    {global_directive}
+    .text
 {name}:
     pushq %rbp
     movq %rsp, %rbp
 {instructions}"#
         )
+    }
+}
+
+impl StaticVariable {
+    pub fn format(&self) -> String {
+        let global_directive = if self.global {
+            &format!(".globl {}", self.name.0)
+        } else {
+            ""
+        };
+        let name = &self.name;
+
+        if self.init.i32() == 0 {
+            format!(
+                r#"
+    {global_directive}
+    .bss
+    .balign 4
+{name}:
+    .zero 4
+"#
+            )
+        } else {
+            let i = self.init.i32();
+            format!(
+                r#"
+    {global_directive}
+    .data
+    .balign 4
+{name}:
+    .long {i}
+"#
+            )
+        }
+    }
+}
+
+impl TopLevel {
+    pub fn format(&self) -> String {
+        match self {
+            Self::F(func) => func.format(),
+            Self::V(var) => var.format(),
+        }
     }
 }
 
@@ -167,6 +216,7 @@ impl Operand {
                 _ => unimplemented!(),
             },
             Self::Stack(offset) => format!("{}(%rbp)", offset),
+            Self::Data(name) => format!("{}(%rip)", name.0),
             Self::Pseudo(_) => unimplemented!(),
         }
     }

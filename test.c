@@ -1,28 +1,12 @@
-int putchar(int c);
 
-int put_n(int n) {
-  putchar(n + 48);
-  putchar(10);
-  return 0;
-}
+// use an int that's within 8 bytes of a page boundary as a stack argument
+// this makes sure we don't use 8-byte push to push 4-byte values in memory
+// NOTE: this doesn't test what it's supposed to on macOS, only on Linux;
+// on Linux the BSS section is at the end of the executable, followed by
+// unmapped memory on macOS the last section in the executable is __LINKEDIT so
+// if we overrun a page boundary we don't hit unmapped memory
 
-int test(int a, int b, int c, int d, int e, int f, int g, int h, int i) {
-  put_n(a);
-  put_n(b);
-  put_n(c);
-  put_n(d);
-  put_n(e);
-  put_n(f);
-  put_n(g);
-  put_n(h);
-  put_n(i);
+extern int zed; // defined in data_on_page_boundary.s
+int foo(int a, int b, int c, int d, int e, int f, int g) { return g + 1; }
 
-  if (a != 1 || b != 2 || c != 3 || d != 4 || e != 5 || f != 6 || g != 7 ||
-      h != 8 || i != 9) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
-int main(void) { return test(1, 2, 3, 4, 5, 6, 7, 8, 9); }
+int main(void) { return foo(0, 0, 0, 0, 0, 0, zed); }

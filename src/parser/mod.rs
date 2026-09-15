@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 use std::fmt::Display;
 
+use crate::analysis::Type;
 use crate::diagnostics::{Diagnostic, Span, Stage};
 use crate::lexer::{SpannedToken, Token};
 
 pub use ast::*;
 mod ast;
 mod debug;
+mod eval;
 mod lowering;
 mod operators;
 pub use operators::*;
@@ -37,12 +39,12 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Option<Program> {
-        let mut functions = vec![];
+        let mut declarations = vec![];
         while self.peek().is_some_and(|&t| t != Token::EndOfInput) {
-            functions.push(self.function_declaration()?);
+            declarations.push(self.declaration()?);
         }
 
-        Some(Program(functions))
+        Some(Program(declarations))
     }
 
     fn error(&mut self, span: Span, message: impl Into<String>) {
@@ -85,84 +87,84 @@ impl Parser {
     }
 
     pub fn block_item(&mut self) -> Option<BlockItem> {
-        if self.peek()?.is_int() {
+        if self.peek()?.is_specifier() {
             self.declaration().map(BlockItem::Decl)
         } else {
             self.statement().map(BlockItem::Stmt)
         }
     }
 
-    pub fn function_declaration(&mut self) -> Option<FunctionDeclaration> {
-        let start = self.peek_span()?;
-        self.consume_with_custom_expected_message(Token::Int, "function declaration")?;
-        let name_span = self.peek_span()?;
-        let name = self.ident()?;
-
-        self.consume(Token::OpenParen)?;
-        let args = self.param_list()?;
-        self.consume(Token::CloseParen)?;
-
-        let block = match self.peek()? {
-            Token::OpenBrace => Some(self.block()?),
-            Token::Semicolon => {
-                self.next()?;
-                None
-            }
-            _ => {
+    pub fn variable_declaration(&mut self) -> Option<VariableDeclaration> {
+        match self.declaration()? {
+            Declaration::Var(v) => Some(v),
+            Declaration::Func(f) => {
                 self.error(
-                    self.peek_span()?,
-                    format!(
-                        "Unexpected token {}. Expected function body or ;",
-                        self.peek().unwrap()
-                    ),
+                    f.span,
+                    "expected variable declaration, found function declaration",
                 );
 
-                return None;
+                None
             }
-        };
-
-        let span = start.start..self.prev_span()?.end;
-
-        Some(FunctionDeclaration {
-            name,
-            params: args,
-            body: block,
-            span,
-            name_span,
-        })
-    }
-
-    pub fn variable_declaration(&mut self) -> Option<VariableDeclaration> {
-        let start = self.peek_span()?;
-        self.consume(Token::Int)?;
-        let name = self.ident()?;
-
-        let mut init = None;
-
-        if self.consume_if_present(Token::Assign).is_some() {
-            init = Some(self.expression(0)?);
         }
-
-        self.consume(Token::Semicolon)?;
-        let span = start.start..self.prev_span()?.end;
-
-        Some(VariableDeclaration { name, init, span })
     }
 
     pub fn declaration(&mut self) -> Option<Declaration> {
         let start = self.i;
 
-        self.consume(Token::Int)?;
-        self.consume(Token::Ident)?;
+        let (_, storage_class) = {
+            let mut specifiers = vec![];
+            while let Some(Some(s)) = self.peek().map(|s| s.specifier()) {
+                self.next()?;
+                specifiers.push(s);
+            }
+
+            let specifiers_span = start..self.i;
+            self.type_and_storage_class(specifiers, specifiers_span)?
+        };
+
+        let name_span = self.peek_span()?;
+        let name = self.ident()?;
 
         match self.peek()? {
             Token::Assign | Token::Semicolon => {
-                self.i = start;
-                self.variable_declaration().map(Declaration::Var)
+                let mut init = None;
+                if self.consume_if_present(Token::Assign).is_some() {
+                    init = Some(self.expression(0)?);
+                }
+
+                self.consume(Token::Semicolon)?;
+                let span = start..self.prev_span()?.end;
+
+                Some(Declaration::Var(VariableDeclaration {
+                    name,
+                    init,
+                    span,
+                    storage_class,
+                }))
             }
             Token::OpenParen => {
-                self.i = start;
-                self.function_declaration().map(Declaration::Func)
+                self.next()?;
+
+                let params = self.param_list()?;
+                self.consume(Token::CloseParen)?;
+
+                let mut body = None;
+                if self.peek()?.is_open_brace() {
+                    body = Some(self.block()?);
+                } else {
+                    self.consume(Token::Semicolon)?;
+                }
+
+                let span = start..self.prev_span()?.end;
+
+                Some(Declaration::Func(FunctionDeclaration {
+                    name,
+                    params,
+                    body,
+                    span,
+                    name_span,
+                    storage_class,
+                }))
             }
             _ => {
                 let found = self.peek().copied().unwrap_or(Token::EndOfInput);
@@ -648,6 +650,43 @@ impl Parser {
         }
     }
 
+    pub fn type_and_storage_class(
+        &mut self,
+        specifiers: Vec<Specifier>,
+        span: Span,
+    ) -> Option<(Type, StorageClass)> {
+        let mut types = vec![];
+        let mut storage_classes = vec![];
+
+        for specifier in &specifiers {
+            match specifier {
+                Specifier::Int => types.push(specifier),
+                Specifier::Extern => storage_classes.push(specifier),
+                Specifier::Static => storage_classes.push(specifier),
+            }
+        }
+
+        if types.len() != 1 {
+            self.error(span.clone(), "Invalid type specifier");
+            return None;
+        }
+
+        if storage_classes.len() > 1 {
+            self.error(span, "Invalid storage class");
+            return None;
+        }
+
+        let ty = types[0].ty();
+
+        let storage_class = if storage_classes.len() == 1 {
+            storage_classes[0].storage_class()
+        } else {
+            StorageClass::None
+        };
+
+        Some((ty, storage_class))
+    }
+
     pub fn is_at_end(&self) -> bool {
         self.i >= self.tokens.len()
     }
@@ -721,29 +760,6 @@ impl Parser {
             None => {
                 let span = self.eof_span();
                 self.error(span, expected_msg(expected, Token::EndOfInput));
-                None
-            }
-        }
-    }
-
-    pub fn consume_with_custom_expected_message(
-        &mut self,
-        expected: Token,
-        msg: impl Display,
-    ) -> Option<()> {
-        match self.peek() {
-            Some(&found) if found == expected => {
-                self.i += 1;
-                Some(())
-            }
-            Some(&found) => {
-                let span = self.peek_span()?;
-                self.error(span, expected_msg(msg, found));
-                None
-            }
-            None => {
-                let span = self.eof_span();
-                self.error(span, expected_msg(msg, Token::EndOfInput));
                 None
             }
         }

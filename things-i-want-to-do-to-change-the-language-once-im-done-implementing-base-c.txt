@@ -1,0 +1,6 @@
+- Constants can refer to other constants
+- methods on a struct with Impl that can take a pointer to self as the first
+  arguement (or not!)
+- storage class must come before type, like strict order for specifiers instead
+  of being able to write `int static i = 0`
+- tagged unions

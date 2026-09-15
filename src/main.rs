@@ -1,14 +1,16 @@
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, ExitCode, Stdio},
 };
 
 use clap::Parser;
 
-use diagnostics::{Diagnostic, Stage, report_all};
+use diagnostics::{Diagnostic, report_all};
 use lexer::lex;
 use parser::parse;
+
+use crate::analysis::validate_program;
 
 mod analysis;
 mod codegen;
@@ -118,17 +120,17 @@ fn compile_pipeline(
         return Ok(None);
     }
 
-    let semantic_errors = analysis::validate_program(&mut program);
+    {
+        let mut diagnostics = diagnostics::Diagnostics::new();
+        validate_program(&mut program, &mut diagnostics);
 
-    if args.keep_intermediates {
-        let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
-    }
+        if args.keep_intermediates {
+            let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
+        }
 
-    if !semantic_errors.is_empty() {
-        return Err(semantic_errors
-            .iter()
-            .map(|e| Diagnostic::new(Stage::Analysis, e.span().clone(), e.message()))
-            .collect());
+        if !diagnostics.is_empty() {
+            return Err(diagnostics.vec);
+        }
     }
 
     if args.validate {

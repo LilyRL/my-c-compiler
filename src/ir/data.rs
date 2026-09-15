@@ -1,13 +1,27 @@
-use crate::parser::Identifier;
+use crate::parser::{Constant, Identifier};
 
 #[derive(Debug)]
-pub struct Program(pub Vec<FunctionDefinition>);
+pub struct Program(pub Vec<TopLevel>);
+
+#[derive(Debug)]
+pub enum TopLevel {
+    F(FunctionDefinition),
+    V(StaticVariable),
+}
 
 #[derive(Debug)]
 pub struct FunctionDefinition {
     pub name: Identifier,
     pub params: Vec<Identifier>,
     pub body: Vec<Instruction>,
+    pub global: bool,
+}
+
+#[derive(Debug)]
+pub struct StaticVariable {
+    pub name: Identifier,
+    pub global: bool,
+    pub init: Constant,
 }
 
 #[derive(Debug)]
