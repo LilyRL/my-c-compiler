@@ -6,3 +6,4 @@
 - tagged unions
 - traits
 - define operators like in haskell
+- macros. but simpler than that. maybe they can just take arguments like a function, if you want them to. or of course source code. and emit with an emit keyword?
