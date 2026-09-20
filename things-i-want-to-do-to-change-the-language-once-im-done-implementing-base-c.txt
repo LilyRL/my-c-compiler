@@ -4,3 +4,5 @@
 - storage class must come before type, like strict order for specifiers instead
   of being able to write `int static i = 0`
 - tagged unions
+- traits
+- define operators like in haskell
