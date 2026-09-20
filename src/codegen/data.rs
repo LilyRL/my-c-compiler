@@ -1,7 +1,62 @@
-use crate::parser::{Constant, Identifier};
+use std::collections::HashMap;
+
+use strum::EnumIs;
+
+use crate::{analysis::StaticInit, parser::Identifier};
 
 #[derive(Debug)]
 pub struct Program(pub Vec<TopLevel>);
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIs)]
+pub enum AssemblyType {
+    Longword = 32,
+    Quadword = 64,
+}
+
+impl AssemblyType {
+    pub fn size_bytes(self) -> u32 {
+        (self as u32) / 8
+    }
+
+    pub fn alignment(self) -> i32 {
+        self.size_bytes() as i32
+    }
+}
+
+pub type AsmSymbols = HashMap<Identifier, AsmSymbol>;
+sge_global::global!(AsmSymbols, asm_symbols);
+pub fn set_asm_symbol_table(symbols: AsmSymbols) {
+    set_asm_symbols(symbols);
+}
+
+pub enum AsmSymbol {
+    Object { ty: AssemblyType, is_static: bool },
+    Function { defined: bool },
+}
+
+impl AsmSymbol {
+    pub fn is_static(&self) -> bool {
+        match self {
+            Self::Object { is_static, .. } => *is_static,
+            Self::Function { .. } => false,
+        }
+    }
+
+    pub fn ty(&self) -> Option<AssemblyType> {
+        match self {
+            Self::Object { ty, .. } => Some(*ty),
+            Self::Function { .. } => None,
+        }
+    }
+
+    pub fn defined(&self) -> bool {
+        match self {
+            Self::Object { .. } => true,
+            Self::Function { defined } => *defined,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum TopLevel {
@@ -20,37 +75,63 @@ pub struct FunctionDefinition {
 pub struct StaticVariable {
     pub name: Identifier,
     pub global: bool,
-    pub init: Constant,
+    pub init: StaticInit,
+    pub alignment: u32,
 }
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Mov {
+        ty: AssemblyType,
+        src: Operand,
+        dst: Operand,
+    },
+    Movsx {
         src: Operand,
         dst: Operand,
     },
     Unary {
+        ty: AssemblyType,
         operator: UnaryOperator,
         operand: Operand,
     },
     Binary {
+        ty: AssemblyType,
         operator: BinaryOperator,
         src: Operand,
         dst: Operand,
     },
-    Cmp(Operand, Operand),
-    Idiv(Operand),
-    Cdq,
+    Cmp(AssemblyType, Operand, Operand),
+    Idiv(AssemblyType, Operand),
+    Cdq(AssemblyType),
     Jump(Identifier),
     JumpCC(CondCode, Identifier),
     SetCC(CondCode, Operand),
     Label(Identifier),
-    AllocateStack(u32),
-    DeallocateStack(u32),
     Push(Operand),
     Call(Identifier),
     Comment(&'static str),
     Ret,
+}
+
+impl Instruction {
+    pub fn deallocate_stack(bytes: u32) -> Self {
+        Self::Binary {
+            ty: AssemblyType::Quadword,
+            operator: BinaryOperator::Add,
+            src: Operand::Imm(bytes as i64),
+            dst: Operand::Reg(Register::StackPointer),
+        }
+    }
+
+    pub fn allocate_stack(bytes: u32) -> Self {
+        Self::Binary {
+            ty: AssemblyType::Quadword,
+            operator: BinaryOperator::Sub,
+            src: Operand::Imm(bytes as i64),
+            dst: Operand::Reg(Register::StackPointer),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -87,6 +168,7 @@ pub enum Register {
     R9,
     R10,
     R11,
+    StackPointer,
 }
 
 #[derive(Debug, Clone)]
@@ -115,7 +197,7 @@ pub enum UnaryOperator {
 
 #[derive(Debug, Clone)]
 pub enum Operand {
-    Imm(i32),
+    Imm(i64),
     Reg(Register),
     Pseudo(Identifier),
     Stack(i32),
@@ -125,14 +207,14 @@ pub enum Operand {
 impl BinaryOperator {
     pub fn op_str(&self) -> &'static str {
         match self {
-            Self::Add => "addl",
-            Self::Sub => "subl",
-            Self::Mul => "imull",
-            Self::LeftShift => "sall",
-            Self::RightShift => "sarl",
-            Self::BitwiseAnd => "andl",
-            Self::BitwiseXor => "xorl",
-            Self::BitwiseOr => "orl",
+            Self::Add => "add",
+            Self::Sub => "sub",
+            Self::Mul => "imul",
+            Self::LeftShift => "sal",
+            Self::RightShift => "sar",
+            Self::BitwiseAnd => "and",
+            Self::BitwiseXor => "xor",
+            Self::BitwiseOr => "or",
             Self::NotEqual
             | Self::GreaterThan
             | Self::GreaterEqual
@@ -141,31 +223,29 @@ impl BinaryOperator {
         }
     }
 
-    pub fn src_size(&self) -> u32 {
+    pub fn src_size(&self) -> Option<u32> {
         match self {
-            Self::Add
-            | Self::Sub
-            | Self::Mul
-            | Self::BitwiseAnd
-            | Self::BitwiseXor
-            | Self::BitwiseOr => 4,
-            Self::LeftShift | Self::RightShift => 1,
-            Self::NotEqual
-            | Self::GreaterThan
-            | Self::GreaterEqual
-            | Self::LessThan
-            | Self::LessEqual => unimplemented!(),
+            Self::LeftShift | Self::RightShift => Some(1),
+            _ => None,
         }
-    }
-
-    pub fn dst_size(&self) -> u32 {
-        4
     }
 
     pub fn cant_have_double_memory(&self) -> bool {
         matches!(
             self,
             Self::Add | Self::Sub | Self::BitwiseAnd | Self::BitwiseXor | Self::BitwiseOr
+        )
+    }
+
+    pub fn cant_have_large_imm(&self) -> bool {
+        matches!(
+            self,
+            Self::Add
+                | Self::Sub
+                | Self::Mul
+                | Self::BitwiseOr
+                | Self::BitwiseAnd
+                | Self::BitwiseXor
         )
     }
 
@@ -185,8 +265,8 @@ impl BinaryOperator {
 impl UnaryOperator {
     pub fn op_str(&self) -> &'static str {
         match self {
-            Self::BitwiseNot => "notl",
-            Self::Negate => "negl",
+            Self::BitwiseNot => "not",
+            Self::Negate => "neg",
             Self::Not => unimplemented!(),
         }
     }

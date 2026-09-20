@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    analysis::{IdentifierAttributes, InitialValue, get_symbols},
+    analysis::{IdentifierAttributes, InitialValue, StaticInit, Symbol, get_symbols},
     ir::{self, StaticVariable, TopLevel},
 };
 use ir::{Instruction, Value};
@@ -23,11 +23,17 @@ impl Program {
                         name: name.clone(),
                         global: *global,
                         init: *i,
+                        ty: entry.ty.clone(),
                     })),
                     InitialValue::Tentitive => definitions.push(TopLevel::V(StaticVariable {
                         name: name.clone(),
                         global: *global,
-                        init: Constant::Int(0),
+                        init: match entry.ty {
+                            Type::Int => StaticInit::Int(0),
+                            Type::Long => StaticInit::Long(0),
+                            _ => unreachable!(),
+                        },
+                        ty: entry.ty.clone(),
                     })),
                     InitialValue::None => (),
                 },
@@ -53,7 +59,7 @@ impl FunctionDeclaration {
         }
 
         Some(ir::FunctionDefinition {
-            params: self.params.into_iter().map(|p| p.name).collect(),
+            params: self.params,
             name: self.name,
             body: instructions,
             global,
@@ -207,11 +213,19 @@ impl Statement {
                 ..
             }) => {
                 let result = value.lower(instructions);
-                let is_equal = Value::Var(Identifier::new("switch_case_is_equal"));
+                let is_equal_name = Identifier::new("switch_case_is_equal");
+                let is_equal = Value::Var(is_equal_name.clone());
+                get_symbols().insert(
+                    is_equal_name,
+                    Symbol {
+                        attributes: IdentifierAttributes::Local,
+                        ty: Type::Int,
+                    },
+                );
                 let break_label = label._break();
 
                 for (label, constant) in cases {
-                    let case_value = Value::Constant(constant.i32());
+                    let case_value = Value::Constant(constant);
                     instructions.push(Instruction::Binary {
                         operator: ir::BinaryOperator::Equal,
                         lhs: case_value,
@@ -286,37 +300,23 @@ impl Expression {
                 });
                 return Value::Var(v.clone());
             }
-            ExprKind::CompoundAssign { operator, lhs, rhs } => {
-                assert!(
-                    lhs.is_var(),
-                    "LValues should have been verified to be valid before lowering to IR."
-                );
-
-                let v = lhs.as_var().cloned().unwrap();
-
-                let lhs_value = Value::Var(v.clone());
-                let rhs_value = rhs.lower(instructions);
-                let dst = Value::Var(Identifier::new(operator.name()));
-
-                instructions.push(Instruction::Binary {
-                    operator: operator.compound_assign().unwrap().lower(),
-                    lhs: lhs_value,
-                    rhs: rhs_value,
-                    dst: dst.clone(),
-                });
-
-                instructions.push(Instruction::Copy {
-                    src: dst.clone(),
-                    dst: Value::Var(v.clone()),
-                });
-
-                return dst;
+            ExprKind::CompoundAssign { .. } => {
+                unreachable!()
             }
             ExprKind::Var(v) => Value::Var(v),
             ExprKind::Constant(c) => c.lower(),
             ExprKind::Unary { operator, expr } => {
+                let dst_name = Identifier::new("tmp");
+                let dst = Value::Var(dst_name.clone());
+                get_symbols().insert(
+                    dst_name,
+                    Symbol {
+                        attributes: IdentifierAttributes::Local,
+                        ty: expr.ty.clone(),
+                    },
+                );
+
                 let src = expr.lower(instructions);
-                let dst = Value::Var(Identifier::new("tmp"));
 
                 instructions.push(Instruction::Unary {
                     operator: operator.lower(),
@@ -326,9 +326,17 @@ impl Expression {
                 dst
             }
             ExprKind::Binary { operator, lhs, rhs } if operator.can_be_lowered() => {
+                let dst_name = Identifier::new(operator.name());
+                let dst = Value::Var(dst_name.clone());
+                get_symbols().insert(
+                    dst_name,
+                    Symbol {
+                        attributes: IdentifierAttributes::Local,
+                        ty: lhs.ty.clone(),
+                    },
+                );
                 let lhs = lhs.lower(instructions);
                 let rhs = rhs.lower(instructions);
-                let dst = Value::Var(Identifier::new(operator.name()));
 
                 instructions.push(Instruction::Binary {
                     operator: operator.lower(),
@@ -340,13 +348,21 @@ impl Expression {
             }
             ExprKind::Binary { operator, lhs, rhs } => match operator {
                 BinaryOperator::And => {
-                    let dst = Value::Var(Identifier::new("and_result"));
+                    let dst_name = Identifier::new("and_result");
+                    let dst = Value::Var(dst_name.clone());
+                    get_symbols().insert(
+                        dst_name,
+                        Symbol {
+                            attributes: IdentifierAttributes::Local,
+                            ty: Type::Int,
+                        },
+                    );
                     let false_label = Identifier::new("and_false");
                     let end_label = Identifier::new("and_end");
 
                     let lhs = lhs.lower(instructions);
                     instructions.push(Instruction::JumpIfZero {
-                        condition: lhs,
+                        condition: lhs.clone(),
                         target: false_label.clone(),
                     });
 
@@ -357,13 +373,13 @@ impl Expression {
                     });
 
                     instructions.push(Instruction::Copy {
-                        src: Value::Constant(1),
+                        src: Value::Constant(Constant::from_int(1, lhs.const_ty().unwrap())),
                         dst: dst.clone(),
                     });
                     instructions.push(Instruction::Jump(end_label.clone()));
                     instructions.push(Instruction::Label(false_label));
                     instructions.push(Instruction::Copy {
-                        src: Value::Constant(0),
+                        src: Value::Constant(Constant::from_int(0, lhs.const_ty().unwrap())),
                         dst: dst.clone(),
                     });
                     instructions.push(Instruction::Label(end_label));
@@ -371,13 +387,21 @@ impl Expression {
                     return dst;
                 }
                 BinaryOperator::Or => {
-                    let dst = Value::Var(Identifier::new("or_result"));
+                    let dst_name = Identifier::new("or_result");
+                    let dst = Value::Var(dst_name.clone());
+                    get_symbols().insert(
+                        dst_name,
+                        Symbol {
+                            attributes: IdentifierAttributes::Local,
+                            ty: Type::Int,
+                        },
+                    );
                     let true_label = Identifier::new("or_true");
                     let end_label = Identifier::new("or_end");
 
                     let lhs = lhs.lower(instructions);
                     instructions.push(Instruction::JumpNotZero {
-                        condition: lhs,
+                        condition: lhs.clone(),
                         target: true_label.clone(),
                     });
 
@@ -388,13 +412,13 @@ impl Expression {
                     });
 
                     instructions.push(Instruction::Copy {
-                        src: Value::Constant(0),
+                        src: Value::Constant(Constant::from_int(0, lhs.const_ty().unwrap())),
                         dst: dst.clone(),
                     });
                     instructions.push(Instruction::Jump(end_label.clone()));
                     instructions.push(Instruction::Label(true_label));
                     instructions.push(Instruction::Copy {
-                        src: Value::Constant(1),
+                        src: Value::Constant(Constant::from_int(1, lhs.const_ty().unwrap())),
                         dst: dst.clone(),
                     });
                     instructions.push(Instruction::Label(end_label));
@@ -414,7 +438,7 @@ impl Expression {
                 instructions.push(Instruction::Binary {
                     operator: ir::BinaryOperator::Add,
                     lhs: expr.clone(),
-                    rhs: Value::Constant(op.n()),
+                    rhs: Value::Constant(op.n(expr.const_ty().unwrap())),
                     dst: expr.clone(),
                 });
 
@@ -426,19 +450,27 @@ impl Expression {
                     "LValues should have been verified to be valid before lowering to IR."
                 );
 
-                let lhs = expr.lower(instructions);
-                let old_value = Value::Var(Identifier::new("postfix_old_value"));
+                let old_value_name = Identifier::new("postfix_old_value");
+                let old_value = Value::Var(old_value_name.clone());
+                get_symbols().insert(
+                    old_value_name,
+                    Symbol {
+                        attributes: IdentifierAttributes::Local,
+                        ty: expr.ty.clone(),
+                    },
+                );
+                let expr = expr.lower(instructions);
 
                 instructions.push(Instruction::Copy {
-                    src: lhs.clone(),
+                    src: expr.clone(),
                     dst: old_value.clone(),
                 });
 
                 instructions.push(Instruction::Binary {
                     operator: ir::BinaryOperator::Add,
-                    lhs: lhs.clone(),
-                    rhs: Value::Constant(op.n()),
-                    dst: lhs.clone(),
+                    lhs: expr.clone(),
+                    rhs: Value::Constant(op.n(expr.const_ty().unwrap())),
+                    dst: expr.clone(),
                 });
 
                 old_value
@@ -447,7 +479,15 @@ impl Expression {
                 let cond = cond.lower(instructions);
                 let else_label = Identifier::new("conditional_else");
                 let end_label = Identifier::new("conditional_end");
-                let result = Value::Var(Identifier::new("conditional_result"));
+                let result_name = Identifier::new("conditional_result");
+                let result = Value::Var(result_name.clone());
+                get_symbols().insert(
+                    result_name,
+                    Symbol {
+                        attributes: IdentifierAttributes::Local,
+                        ty: if_true.ty.clone(),
+                    },
+                );
 
                 instructions.push(Instruction::JumpIfZero {
                     condition: cond,
@@ -474,7 +514,21 @@ impl Expression {
             }
             ExprKind::FunctionCall { name, args } => {
                 let args: Vec<_> = args.into_iter().map(|a| a.lower(instructions)).collect();
-                let result = Value::Var(Identifier::new(format!("{}_result", name.1)));
+                let result_name = Identifier::new(format!("{}_result", name.1));
+                let result = Value::Var(result_name.clone());
+
+                let return_type = match &get_symbols().get(&name).unwrap().ty {
+                    Type::Function(f) => f.return_type.clone(),
+                    _ => unreachable!("call target must have function type"),
+                };
+
+                get_symbols().insert(
+                    result_name,
+                    Symbol {
+                        attributes: IdentifierAttributes::Local,
+                        ty: return_type,
+                    },
+                );
 
                 instructions.push(Instruction::FunctionCall {
                     name,
@@ -484,6 +538,37 @@ impl Expression {
 
                 result
             }
+            ExprKind::Cast { target_type, expr } => {
+                let result = expr.lower(instructions);
+
+                if target_type == result.ty() {
+                    return result;
+                }
+
+                let dst_name = Identifier::new("cast_tmp");
+                get_symbols().insert(
+                    dst_name.clone(),
+                    Symbol {
+                        attributes: IdentifierAttributes::Local,
+                        ty: target_type.clone(),
+                    },
+                );
+                let dst = Value::Var(dst_name);
+
+                if target_type == Type::Long {
+                    instructions.push(Instruction::SignExtend {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if target_type == Type::Int {
+                    instructions.push(Instruction::Truncate {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                }
+
+                dst
+            }
         }
     }
 }
@@ -491,7 +576,8 @@ impl Expression {
 impl Constant {
     pub fn lower(self) -> ir::Value {
         match self {
-            Constant::Int(i) => ir::Value::Constant(i),
+            Constant::Int(i) => ir::Value::Constant(Constant::Int(i)),
+            Constant::Long(l) => ir::Value::Constant(Constant::Long(l)),
         }
     }
 }

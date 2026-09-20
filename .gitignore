@@ -1,10 +1,6 @@
 /target
-test.i
-test.s
-test.ir
-test.ast
 test.o
-test.tokens
+output
 test
 writing-a-c-compiler-tests
 book.pdf

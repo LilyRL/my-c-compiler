@@ -4,11 +4,13 @@ mod lowering;
 
 use std::fmt::Display;
 
-use crate::parser::Constant;
+use crate::{analysis::StaticInit, parser::Constant};
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::SignExtend { src, dst } => write!(f, "\t{} = sign_extend({});", dst, src),
+            Self::Truncate { src, dst } => write!(f, "\t{} = truncate({});", dst, src),
             Self::Return(value) => write!(f, "\treturn {};", value),
             Self::Unary { operator, src, dst } => {
                 let op_str = operator.to_str();
@@ -79,10 +81,20 @@ impl Display for StaticVariable {
     }
 }
 
+impl Display for StaticInit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int(i) => write!(f, "{}", i),
+            Self::Long(l) => write!(f, "{}", l),
+        }
+    }
+}
+
 impl Display for Constant {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int(i) => write!(f, "{}", i),
+            Self::Long(l) => write!(f, "{}", l),
         }
     }
 }

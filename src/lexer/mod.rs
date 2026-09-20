@@ -15,8 +15,12 @@ pub enum Token {
     Ident,
     #[regex("[0-9]+")]
     ConstantInt,
-    #[token("int")]
+    #[regex("int|i32")]
     Int,
+    #[regex("[0-9]+[lL]")]
+    ConstantLong,
+    #[regex("long|i64")]
+    Long,
     #[token("void")]
     Void,
     #[token("return")]
@@ -173,12 +177,20 @@ pub fn lex(source: &str) -> Result<Vec<SpannedToken>, Vec<Diagnostic>> {
 
 impl Token {
     pub fn is_specifier(self) -> bool {
-        matches!(self, Token::Int | Token::Static | Token::Extern)
+        matches!(
+            self,
+            Token::Int | Token::Static | Token::Extern | Token::Long
+        )
+    }
+
+    pub fn is_type(self) -> bool {
+        matches!(self, Token::Int | Token::Long)
     }
 
     pub fn specifier(self) -> Option<Specifier> {
         match self {
             Token::Int => Some(Specifier::Int),
+            Token::Long => Some(Specifier::Long),
             Token::Static => Some(Specifier::Static),
             Token::Extern => Some(Specifier::Extern),
             _ => None,
@@ -190,8 +202,10 @@ impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Token::Ident => "identifier",
-            Token::ConstantInt => "constant",
+            Token::ConstantInt => "literal_int",
             Token::Int => "int",
+            Token::ConstantLong => "literal_long",
+            Token::Long => "long",
             Token::Void => "void",
             Token::Return => "return",
             Token::OpenParen => "(",
@@ -237,7 +251,7 @@ impl Display for Token {
             Token::QuestionMark => "?",
             Token::Colon => ":",
             Token::Goto => "goto",
-            Token::EndOfInput => "end of input",
+            Token::EndOfInput => "EOF",
             Token::Do => "do",
             Token::While => "while",
             Token::For => "for",

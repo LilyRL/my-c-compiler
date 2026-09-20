@@ -1,4 +1,10 @@
-use crate::parser::{Constant, Identifier};
+use strum::IntoDiscriminant;
+
+use crate::{
+    analysis::{StaticInit, Type, get_symbols},
+    codegen::AssemblyType,
+    parser::{Constant, ConstantType, FunctionParameter, Identifier},
+};
 
 #[derive(Debug)]
 pub struct Program(pub Vec<TopLevel>);
@@ -12,7 +18,7 @@ pub enum TopLevel {
 #[derive(Debug)]
 pub struct FunctionDefinition {
     pub name: Identifier,
-    pub params: Vec<Identifier>,
+    pub params: Vec<FunctionParameter>,
     pub body: Vec<Instruction>,
     pub global: bool,
 }
@@ -21,7 +27,8 @@ pub struct FunctionDefinition {
 pub struct StaticVariable {
     pub name: Identifier,
     pub global: bool,
-    pub init: Constant,
+    pub init: StaticInit,
+    pub ty: Type,
 }
 
 #[derive(Debug)]
@@ -58,6 +65,14 @@ pub enum Instruction {
         args: Vec<Value>,
         dst: Value,
     },
+    SignExtend {
+        src: Value,
+        dst: Value,
+    },
+    Truncate {
+        src: Value,
+        dst: Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -89,6 +104,30 @@ pub enum UnaryOperator {
 
 #[derive(Clone, Debug)]
 pub enum Value {
-    Constant(i32),
+    Constant(Constant),
     Var(Identifier),
+}
+
+impl Value {
+    pub fn ty(&self) -> Type {
+        match self {
+            Value::Constant(c) => c.ty(),
+            Value::Var(i) => get_symbols().get(i).unwrap().ty.clone(),
+        }
+    }
+
+    pub fn const_ty(&self) -> Option<ConstantType> {
+        match self {
+            Value::Constant(c) => Some(c.discriminant()),
+            Value::Var(i) => get_symbols().get(i).unwrap().ty.to_constant(),
+        }
+    }
+
+    pub fn asm_type(&self) -> AssemblyType {
+        match self.ty() {
+            Type::Int => AssemblyType::Longword,
+            Type::Long => AssemblyType::Quadword,
+            Type::Function(_) => unimplemented!(),
+        }
+    }
 }

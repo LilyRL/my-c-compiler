@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt::Display};
 
-use strum::EnumIs;
+use strum::{EnumDiscriminants, EnumIs, IntoDiscriminant};
 
 use super::operators::{BinaryOperator, IncDec, UnaryOperator};
 use crate::{analysis::Type, diagnostics::Span};
@@ -34,11 +34,13 @@ pub struct FunctionDeclaration {
     pub span: Span,
     pub name_span: Span,
     pub storage_class: StorageClass,
+    pub return_type: Type,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Specifier {
     Int,
+    Long,
     Static,
     Extern,
 }
@@ -47,6 +49,7 @@ impl Specifier {
     pub fn ty(&self) -> Type {
         match self {
             Specifier::Int => Type::Int,
+            Specifier::Long => Type::Long,
             _ => panic!(),
         }
     }
@@ -64,6 +67,7 @@ impl Specifier {
 pub struct FunctionParameter {
     pub name: Identifier,
     pub span: Span,
+    pub ty: Type,
 }
 
 #[derive(Debug)]
@@ -72,6 +76,7 @@ pub struct VariableDeclaration {
     pub init: Option<Expression>,
     pub span: Span,
     pub storage_class: StorageClass,
+    pub ty: Type,
 }
 
 #[derive(Debug)]
@@ -228,10 +233,14 @@ pub enum ForInit {
     None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ExprKind {
     Var(Identifier),
     Constant(Constant),
+    Cast {
+        target_type: Type,
+        expr: Box<Expression>,
+    },
     Unary {
         operator: UnaryOperator,
         expr: Box<Expression>,
@@ -256,15 +265,20 @@ pub enum ExprKind {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Expression {
+    pub ty: Type,
     pub kind: ExprKind,
     pub span: Span,
 }
 
 impl Expression {
     pub fn new(kind: ExprKind, span: Span) -> Self {
-        Self { kind, span }
+        Self {
+            kind,
+            span,
+            ty: Type::Int,
+        }
     }
 
     pub fn is_var(&self) -> bool {
@@ -279,15 +293,66 @@ impl Expression {
     }
 }
 
-#[derive(Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Clone, Copy, EnumDiscriminants)]
+#[strum_discriminants(name(ConstantType))]
 pub enum Constant {
     Int(i32),
+    Long(i64),
 }
 
 impl Constant {
-    pub fn i32(self) -> i32 {
+    pub fn i64(&self) -> i64 {
         match self {
-            Self::Int(i) => i,
+            Constant::Int(i) => *i as i64,
+            Constant::Long(l) => *l,
+        }
+    }
+
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            Constant::Int(_) => 4,
+            Constant::Long(_) => 8,
+        }
+    }
+
+    pub fn is_zero(&self) -> bool {
+        match self {
+            Constant::Int(i) => *i == 0,
+            Constant::Long(l) => *l == 0,
+        }
+    }
+
+    pub fn from_int(i: i32, ty: ConstantType) -> Self {
+        match ty {
+            ConstantType::Int => Constant::Int(i),
+            ConstantType::Long => Constant::Long(i as i64),
+        }
+    }
+
+    pub fn to_common_pair(self, other: Self) -> (Self, Self) {
+        if self.discriminant() == other.discriminant() {
+            (self, other)
+        } else {
+            (self.cast_long(), other.cast_long())
+        }
+    }
+
+    pub fn cast_long(self) -> Self {
+        self.cast(ConstantType::Long)
+    }
+
+    pub fn cast(self, const_ty: ConstantType) -> Constant {
+        match (self, const_ty) {
+            (Constant::Int(i), ConstantType::Long) => Constant::Long(i as i64),
+            (Constant::Long(l), ConstantType::Int) => Constant::Int(l as i32),
+            (Constant::Int(_), ConstantType::Int) | (Constant::Long(_), ConstantType::Long) => self,
+        }
+    }
+
+    pub fn ty(&self) -> Type {
+        match self {
+            Constant::Int(_) => Type::Int,
+            Constant::Long(_) => Type::Long,
         }
     }
 }
@@ -298,7 +363,8 @@ impl Expression {
         while let Some(expr) = stack.pop() {
             f(expr, state);
             match &expr.kind {
-                ExprKind::Unary { expr, .. }
+                ExprKind::Cast { expr, .. }
+                | ExprKind::Unary { expr, .. }
                 | ExprKind::Prefix(_, expr)
                 | ExprKind::Postfix(_, expr) => stack.push(expr),
                 ExprKind::Binary { lhs, rhs, .. }
@@ -314,6 +380,40 @@ impl Expression {
                 }
                 ExprKind::FunctionCall { args, .. } => {
                     for arg in args.iter().rev() {
+                        stack.push(arg);
+                    }
+                }
+                ExprKind::Var(_) | ExprKind::Constant(_) => {}
+            }
+        }
+    }
+
+    pub fn process_inner_expressions_mut<S, F: Fn(&mut Self, &mut S)>(
+        &mut self,
+        state: &mut S,
+        f: &F,
+    ) {
+        let mut stack: Vec<&mut Expression> = vec![self];
+        while let Some(expr) = stack.pop() {
+            f(expr, state);
+            match &mut expr.kind {
+                ExprKind::Cast { expr, .. }
+                | ExprKind::Unary { expr, .. }
+                | ExprKind::Prefix(_, expr)
+                | ExprKind::Postfix(_, expr) => stack.push(expr),
+                ExprKind::Binary { lhs, rhs, .. }
+                | ExprKind::CompoundAssign { lhs, rhs, .. }
+                | ExprKind::Assignment(lhs, rhs) => {
+                    stack.push(rhs);
+                    stack.push(lhs);
+                }
+                ExprKind::Conditional(cond, if_true, if_false) => {
+                    stack.push(if_false);
+                    stack.push(if_true);
+                    stack.push(cond);
+                }
+                ExprKind::FunctionCall { args, .. } => {
+                    for arg in args.iter_mut().rev() {
                         stack.push(arg);
                     }
                 }
@@ -353,7 +453,7 @@ impl Statement {
                     stack.push(stmt);
                 }
                 StmtKind::Compound(block) => {
-                    for item in block.iter_mut().rev() {
+                    for item in block.iter_mut() {
                         if let BlockItem::Stmt(stmt) = item {
                             stack.push(stmt);
                         }
@@ -367,6 +467,53 @@ impl Statement {
                 | StmtKind::Continue(_) => {}
             }
         }
+    }
+
+    pub fn process_inner_expressions_mut<S, F: Fn(&mut Expression, &mut S)>(
+        &mut self,
+        state: &mut S,
+        f: &F,
+    ) {
+        self.process_inner_statements_mut(state, &|stmt, state| {
+            let mut stack: Vec<&mut Expression> = vec![];
+
+            match &mut stmt.kind {
+                StmtKind::Return(e)
+                | StmtKind::Expression(e)
+                | StmtKind::If { cond: e, .. }
+                | StmtKind::While { cond: e, .. }
+                | StmtKind::DoWhile { cond: e, .. } => {
+                    e.process_inner_expressions_mut(state, f);
+                }
+                StmtKind::For {
+                    init,
+                    condition,
+                    post,
+                    ..
+                } => {
+                    if let ForInit::Expr(e) = init {
+                        e.process_inner_expressions_mut(state, f);
+                    }
+                    if let Some(e) = condition {
+                        e.process_inner_expressions_mut(state, f);
+                    }
+                    if let Some(e) = post {
+                        e.process_inner_expressions_mut(state, f);
+                    }
+                }
+                StmtKind::Switch(switch) => {
+                    stack.push(&mut switch.value);
+                }
+                StmtKind::Null
+                | StmtKind::Goto(_)
+                | StmtKind::Break(_)
+                | StmtKind::Continue(_)
+                | StmtKind::Label(_, _)
+                | StmtKind::Compound(_)
+                | StmtKind::Case { .. }
+                | StmtKind::DefaultCase { .. } => {}
+            }
+        });
     }
 
     pub fn process_inner_statements<S, F: Fn(&Statement, &mut S)>(&self, state: &mut S, f: &F) {

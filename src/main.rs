@@ -18,6 +18,7 @@ mod diagnostics;
 mod ir;
 mod lexer;
 mod parser;
+mod utils;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -66,6 +67,7 @@ struct Paths {
     assembly: PathBuf,
     output: PathBuf,
     ir: PathBuf,
+    ir_extra: PathBuf,
     parsed_ast: PathBuf,
     tokens: PathBuf,
 }
@@ -73,10 +75,12 @@ struct Paths {
 impl Paths {
     fn new(args: &Args) -> Self {
         let input = args.input_path.clone();
-        let assembly = input.with_extension("s");
-        let ir = input.with_extension("ir");
-        let parsed_ast = input.with_extension("ast");
-        let tokens = input.with_extension("tokens");
+        let _ = fs::create_dir("output");
+        let assembly = PathBuf::from("output/asm.s");
+        let ir = PathBuf::from("output/tacky");
+        let ir_extra = PathBuf::from("output/tacky_extra");
+        let parsed_ast = PathBuf::from("output/ast");
+        let tokens = PathBuf::from("output/tokens");
 
         let output = if let Some(path) = args.output_path.clone() {
             path
@@ -95,6 +99,7 @@ impl Paths {
             ir,
             parsed_ast,
             tokens,
+            ir_extra,
         }
     }
 }
@@ -111,7 +116,13 @@ fn compile_pipeline(
     }
 
     if args.keep_intermediates {
-        let _ = fs::write(&paths.tokens, format!("{:#?}", tokens));
+        let _ = fs::write(
+            &paths.tokens,
+            tokens
+                .iter()
+                .map(|t| format!("{} ", t.token))
+                .collect::<String>(),
+        );
     }
 
     let mut program = parse(source.to_string(), tokens)?;
@@ -145,6 +156,7 @@ fn compile_pipeline(
 
     if args.keep_intermediates {
         let _ = fs::write(&paths.ir, format!("{tacky_program}"));
+        let _ = fs::write(&paths.ir_extra, format!("{:#?}", tacky_program));
     }
 
     let mut asm_program = tacky_program.lower();

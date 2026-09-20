@@ -7,6 +7,7 @@ impl Display for Expression {
             ExprKind::Var(i) => write!(f, "{}", i.0),
             ExprKind::Constant(c) => match c {
                 Constant::Int(i) => write!(f, "{}", i),
+                Constant::Long(l) => write!(f, "{}", l),
             },
             ExprKind::Unary { operator, expr } => write!(f, "({} {})", operator.symbol(), expr),
             ExprKind::Binary { operator, lhs, rhs } => {
@@ -29,6 +30,7 @@ impl Display for Expression {
                     .join(", ");
                 write!(f, "{}({})", name.0, args_str)
             }
+            ExprKind::Cast { target_type, expr } => write!(f, "({}) {}", target_type, expr),
         }
     }
 }

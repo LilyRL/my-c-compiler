@@ -321,10 +321,8 @@ fn resolve_expression(
             resolve_expression(lhs, identifier_map, diagnostics);
             resolve_expression(rhs, identifier_map, diagnostics)
         }
-        ExprKind::CompoundAssign { lhs, rhs, .. } => {
-            check_lvalue(lhs, diagnostics);
-            resolve_expression(lhs, identifier_map, diagnostics);
-            resolve_expression(rhs, identifier_map, diagnostics);
+        ExprKind::CompoundAssign { .. } => {
+            unreachable!()
         }
         ExprKind::Postfix(_, expr) => {
             check_lvalue(expr, diagnostics);
@@ -354,6 +352,9 @@ fn resolve_expression(
             }
         }
         ExprKind::Constant(_) => {}
+        ExprKind::Cast { expr, .. } => {
+            resolve_expression(expr, identifier_map, diagnostics);
+        }
     }
 }
 

@@ -13,7 +13,7 @@ mod lowering;
 mod operators;
 pub use operators::*;
 
-pub struct Parser {
+struct Parser {
     source: String,
     tokens: Vec<SpannedToken>,
     errors: Vec<Diagnostic>,
@@ -29,7 +29,7 @@ fn expected_msg(expected: impl Display, found: Token) -> String {
 }
 
 impl Parser {
-    pub fn new(source: String, tokens: Vec<SpannedToken>) -> Self {
+    fn new(source: String, tokens: Vec<SpannedToken>) -> Self {
         Self {
             source,
             tokens,
@@ -38,7 +38,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Option<Program> {
+    fn parse(&mut self) -> Option<Program> {
         let mut declarations = vec![];
         while self.peek().is_some_and(|&t| t != Token::EndOfInput) {
             declarations.push(self.declaration()?);
@@ -68,7 +68,7 @@ impl Parser {
         self.peek_span().unwrap_or_else(|| self.eof_span())
     }
 
-    pub fn block(&mut self) -> Option<Block> {
+    fn block(&mut self) -> Option<Block> {
         self.consume(Token::OpenBrace)?;
         let statements = self.block_items()?;
         self.consume(Token::CloseBrace)?;
@@ -76,7 +76,7 @@ impl Parser {
         Some(statements)
     }
 
-    pub fn block_items(&mut self) -> Option<Block> {
+    fn block_items(&mut self) -> Option<Block> {
         let mut items = vec![];
 
         while !self.peek()?.is_close_brace() {
@@ -86,7 +86,7 @@ impl Parser {
         Some(items)
     }
 
-    pub fn block_item(&mut self) -> Option<BlockItem> {
+    fn block_item(&mut self) -> Option<BlockItem> {
         if self.peek()?.is_specifier() {
             self.declaration().map(BlockItem::Decl)
         } else {
@@ -94,7 +94,7 @@ impl Parser {
         }
     }
 
-    pub fn variable_declaration(&mut self) -> Option<VariableDeclaration> {
+    fn variable_declaration(&mut self) -> Option<VariableDeclaration> {
         match self.declaration()? {
             Declaration::Var(v) => Some(v),
             Declaration::Func(f) => {
@@ -108,10 +108,10 @@ impl Parser {
         }
     }
 
-    pub fn declaration(&mut self) -> Option<Declaration> {
+    fn declaration(&mut self) -> Option<Declaration> {
         let start = self.i;
 
-        let (_, storage_class) = {
+        let (ty, storage_class) = {
             let mut specifiers = vec![];
             while let Some(Some(s)) = self.peek().map(|s| s.specifier()) {
                 self.next()?;
@@ -140,6 +140,7 @@ impl Parser {
                     init,
                     span,
                     storage_class,
+                    ty,
                 }))
             }
             Token::OpenParen => {
@@ -164,6 +165,7 @@ impl Parser {
                     span,
                     name_span,
                     storage_class,
+                    return_type: ty,
                 }))
             }
             _ => {
@@ -182,12 +184,12 @@ impl Parser {
         }
     }
 
-    pub fn param_list(&mut self) -> Option<Vec<FunctionParameter>> {
+    fn param_list(&mut self) -> Option<Vec<FunctionParameter>> {
         let consume_next = |s: &mut Self, args: &mut Vec<FunctionParameter>| -> Option<()> {
-            s.consume(Token::Int)?;
+            let ty = s.type_()?;
             let span = s.peek_span()?;
             let name = s.ident()?;
-            args.push(FunctionParameter { span, name });
+            args.push(FunctionParameter { span, name, ty });
             Some(())
         };
 
@@ -207,7 +209,7 @@ impl Parser {
         }
     }
 
-    pub fn arguement_list(&mut self) -> Option<Vec<Expression>> {
+    fn arguement_list(&mut self) -> Option<Vec<Expression>> {
         if self.peek().is_some_and(|t| t.is_close_paren()) {
             return Some(vec![]);
         }
@@ -226,7 +228,7 @@ impl Parser {
         Some(args)
     }
 
-    pub fn statement(&mut self) -> Option<Statement> {
+    fn statement(&mut self) -> Option<Statement> {
         match self.peek()? {
             Token::OpenBrace => {
                 let start = self.peek_span()?;
@@ -385,14 +387,12 @@ impl Parser {
                 let start = self.peek_span()?;
                 self.next()?;
 
-                if self.peek() != Some(&Token::ConstantInt) {
+                let Some(value) = self.constant() else {
                     let found = self.peek().copied().unwrap_or(Token::EndOfInput);
                     let span = self.peek_span_or_eof();
                     self.error(span, expected_msg(Token::ConstantInt, found));
                     return None;
-                }
-                self.next()?;
-                let value = self.constant()?;
+                };
 
                 self.consume(Token::Colon)?;
                 let header_end = self.prev_span()?.end;
@@ -433,14 +433,28 @@ impl Parser {
         }
     }
 
+    fn constant(&mut self) -> Option<Constant> {
+        match self.peek()? {
+            Token::ConstantInt => {
+                self.next()?;
+                self.constant_int()
+            }
+            Token::ConstantLong => {
+                self.next()?;
+                self.constant_long()
+            }
+            _ => None,
+        }
+    }
+
     /// consumes semicolon
-    pub fn for_init(&mut self) -> Option<ForInit> {
+    fn for_init(&mut self) -> Option<ForInit> {
         if self.peek() == Some(&Token::Semicolon) {
             self.next()?;
             return Some(ForInit::None);
         }
 
-        if self.peek() == Some(&Token::Int) {
+        if self.peek().is_some_and(|s| s.is_type()) {
             let decl = self.variable_declaration()?;
             return Some(ForInit::Decl(decl));
         }
@@ -450,14 +464,14 @@ impl Parser {
         Some(ForInit::Expr(expr))
     }
 
-    pub fn expression_or_nothing(&mut self) -> Option<Expression> {
+    fn expression_or_nothing(&mut self) -> Option<Expression> {
         match self.peek()? {
             Token::Semicolon | Token::CloseParen => None,
             _ => self.expression(0),
         }
     }
 
-    pub fn expression(&mut self, min_precedence: u32) -> Option<Expression> {
+    fn expression(&mut self, min_precedence: u32) -> Option<Expression> {
         let mut lhs = self.factor()?;
 
         loop {
@@ -514,7 +528,7 @@ impl Parser {
         Some(lhs)
     }
 
-    pub fn factor(&mut self) -> Option<Expression> {
+    fn factor(&mut self) -> Option<Expression> {
         match self.next()? {
             Token::Ident => {
                 let span = self.current_spanned()?.span.clone();
@@ -542,17 +556,40 @@ impl Parser {
             }
             Token::OpenParen => {
                 let open = self.current_spanned()?.span.start;
-                let expr = self.expression(0)?;
-                self.consume(Token::CloseParen)?;
-                let close = self.prev_span()?.end;
-                let parenthesized = Expression::new(expr.kind, open..close);
-                self.postfix(parenthesized)
+
+                let expr;
+                if self.is_type_next() {
+                    let ty = self.type_()?;
+                    self.consume(Token::CloseParen)?;
+                    let inner_expr = self.factor()?;
+                    let close = self.prev_span()?.end;
+                    expr = Expression::new(
+                        ExprKind::Cast {
+                            target_type: ty,
+                            expr: Box::new(inner_expr),
+                        },
+                        open..close,
+                    );
+                } else {
+                    let inner_expr = self.expression(0)?;
+                    let close = self.prev_span()?.end;
+                    expr = Expression::new(inner_expr.kind, open..close);
+                    self.consume(Token::CloseParen)?;
+                }
+
+                self.postfix(expr)
             }
             Token::ConstantInt => {
                 // it doesnt make sense to have a postfix operator on a constant, but we look for it anyway,
                 // so that if this is done, we give a more useful error like "invalid lvalue", instead of "unexpected characters"
                 let span = self.current_spanned()?.span.clone();
-                let expr = Expression::new(ExprKind::Constant(self.constant()?), span);
+                let expr = Expression::new(ExprKind::Constant(self.constant_int()?), span);
+                self.postfix(expr)
+            }
+            Token::ConstantLong => {
+                // see above ^^^
+                let span = self.current_spanned()?.span.clone();
+                let expr = Expression::new(ExprKind::Constant(self.constant_long()?), span);
                 self.postfix(expr)
             }
             Token::Hyphen => {
@@ -623,19 +660,37 @@ impl Parser {
     }
 
     /// parses the constant at the current position without consuming anything
-    pub fn constant(&mut self) -> Option<Constant> {
+    fn constant_int(&mut self) -> Option<Constant> {
         let span = self.current_spanned()?.span.clone();
 
         match self.source[span.clone()].parse::<i32>() {
             Ok(value) => Some(Constant::Int(value)),
+            Err(_) => match self.source[span.clone()].parse::<i64>() {
+                Ok(value) => Some(Constant::Long(value)),
+                Err(_) => {
+                    self.error(span, "integer constant is too large to fit in an 'int'");
+                    None
+                }
+            },
+        }
+    }
+
+    /// parses the constant at the current position without consuming anything
+    fn constant_long(&mut self) -> Option<Constant> {
+        let span = self.current_spanned()?.span.clone();
+        // remove l on the end
+        let number_span = span.start..(span.end - 1);
+
+        match self.source[number_span].parse::<i64>() {
+            Ok(value) => Some(Constant::Long(value)),
             Err(_) => {
-                self.error(span, "integer constant is too large to fit in an 'int'");
+                self.error(span, "integer constant is too large to fit in a 'long'");
                 None
             }
         }
     }
 
-    pub fn ident(&mut self) -> Option<Identifier> {
+    fn ident(&mut self) -> Option<Identifier> {
         self.consume(Token::Ident)?;
 
         match self.current_spanned()? {
@@ -650,7 +705,54 @@ impl Parser {
         }
     }
 
-    pub fn type_and_storage_class(
+    fn is_type_next(&mut self) -> bool {
+        matches!(self.peek(), Some(Token::Int | Token::Long))
+    }
+
+    fn parse_type_list(&mut self, list: &[&Specifier]) -> Option<Type> {
+        if list == [&Specifier::Int] {
+            Some(Type::Int)
+        } else if list == [&Specifier::Long]
+            || list == [&Specifier::Int, &Specifier::Long]
+            || list == [&Specifier::Long, &Specifier::Int]
+        {
+            Some(Type::Long)
+        } else {
+            let span = self.peek_span_or_eof();
+            self.error(span, "invalid type specifiers");
+            None
+        }
+    }
+
+    fn type_(&mut self) -> Option<Type> {
+        match self.peek() {
+            Some(Token::Int) | Some(Token::Long) => {
+                let a = self.next()?.clone();
+                let b = self.peek()?;
+
+                match (a, b) {
+                    (Token::Int, Token::Long) | (Token::Long, Token::Int) => {
+                        self.next()?;
+                        Some(Type::Long)
+                    }
+                    (Token::Int, _) => Some(Type::Int),
+                    (Token::Long, _) => Some(Type::Long),
+                    _ => unreachable!(),
+                }
+            }
+            a => {
+                let found = a.copied().unwrap_or(Token::EndOfInput);
+                let span = self
+                    .current_spanned()
+                    .map(|t| t.span.clone())
+                    .unwrap_or_else(|| self.eof_span());
+                self.error(span, expected_msg("type specifier", found));
+                None
+            }
+        }
+    }
+
+    fn type_and_storage_class(
         &mut self,
         specifiers: Vec<Specifier>,
         span: Span,
@@ -661,22 +763,18 @@ impl Parser {
         for specifier in &specifiers {
             match specifier {
                 Specifier::Int => types.push(specifier),
+                Specifier::Long => types.push(specifier),
                 Specifier::Extern => storage_classes.push(specifier),
                 Specifier::Static => storage_classes.push(specifier),
             }
         }
 
-        if types.len() != 1 {
-            self.error(span.clone(), "Invalid type specifier");
-            return None;
-        }
+        let ty = self.parse_type_list(&types)?;
 
         if storage_classes.len() > 1 {
             self.error(span, "Invalid storage class");
             return None;
         }
-
-        let ty = types[0].ty();
 
         let storage_class = if storage_classes.len() == 1 {
             storage_classes[0].storage_class()
@@ -687,15 +785,15 @@ impl Parser {
         Some((ty, storage_class))
     }
 
-    pub fn is_at_end(&self) -> bool {
+    fn is_at_end(&self) -> bool {
         self.i >= self.tokens.len()
     }
 
-    pub fn is_nearly_at_end(&self) -> bool {
+    fn is_nearly_at_end(&self) -> bool {
         self.i + 1 >= self.tokens.len()
     }
 
-    pub fn next(&mut self) -> Option<&Token> {
+    fn next(&mut self) -> Option<&Token> {
         if !self.is_at_end() {
             let token = &self.tokens[self.i].token;
             self.i += 1;
@@ -705,7 +803,7 @@ impl Parser {
         }
     }
 
-    pub fn current(&self) -> Option<&Token> {
+    fn current(&self) -> Option<&Token> {
         if self.i > 0 {
             Some(&self.tokens[self.i - 1].token)
         } else {
@@ -713,7 +811,7 @@ impl Parser {
         }
     }
 
-    pub fn current_spanned(&self) -> Option<&SpannedToken> {
+    fn current_spanned(&self) -> Option<&SpannedToken> {
         if self.i > 0 {
             Some(&self.tokens[self.i - 1])
         } else {
@@ -721,7 +819,7 @@ impl Parser {
         }
     }
 
-    pub fn peek(&self) -> Option<&Token> {
+    fn peek(&self) -> Option<&Token> {
         if !self.is_at_end() {
             Some(&self.tokens[self.i].token)
         } else {
@@ -729,7 +827,7 @@ impl Parser {
         }
     }
 
-    pub fn double_peek(&self) -> Option<&Token> {
+    fn double_peek(&self) -> Option<&Token> {
         if !self.is_nearly_at_end() {
             Some(&self.tokens[self.i + 1].token)
         } else {
@@ -737,7 +835,7 @@ impl Parser {
         }
     }
 
-    pub fn consume_if_present(&mut self, token: Token) -> Option<()> {
+    fn consume_if_present(&mut self, token: Token) -> Option<()> {
         if self.peek() == Some(&token) {
             self.next();
             Some(())
@@ -746,7 +844,7 @@ impl Parser {
         }
     }
 
-    pub fn consume(&mut self, expected: Token) -> Option<()> {
+    fn consume(&mut self, expected: Token) -> Option<()> {
         match self.peek() {
             Some(&found) if found == expected => {
                 self.i += 1;
@@ -765,7 +863,7 @@ impl Parser {
         }
     }
 
-    pub fn peek_binary_operator(&self) -> Option<BinaryOperator> {
+    fn peek_binary_operator(&self) -> Option<BinaryOperator> {
         let token = self.peek()?;
         BinaryOperator::from_token(*token)
     }

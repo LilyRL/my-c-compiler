@@ -2,11 +2,14 @@ use std::collections::HashSet;
 
 use crate::{
     diagnostics::Diagnostics,
-    parser::{BlockItem, Constant, Identifier, Program, Statement, StmtKind, SwitchCase},
+    parser::{
+        BlockItem, Constant, ConstantType, Identifier, Program, Statement, StmtKind, SwitchCase,
+    },
 };
 
 #[derive(Debug)]
 struct SwitchCaseData<'a> {
+    value_ty: ConstantType,
     cases: &'a mut Vec<SwitchCase>,
     case_set: &'a mut HashSet<Constant>,
     default_case: &'a mut Option<Identifier>,
@@ -56,6 +59,7 @@ fn find_and_collect_switch_cases(stmt: &mut Statement, diagnostics: &mut Diagnos
                 cases: &mut s.cases,
                 case_set: &mut s.case_set,
                 default_case: &mut s.default_case,
+                value_ty: s.value.ty.to_constant().unwrap(),
             };
             collect_switch_cases(&mut s.body, &mut data, diagnostics);
         }
@@ -93,6 +97,7 @@ fn collect_switch_cases(
                 cases: &mut s.cases,
                 case_set: &mut s.case_set,
                 default_case: &mut s.default_case,
+                value_ty: s.value.ty.to_constant().unwrap(),
             };
             collect_switch_cases(&mut s.body, &mut data, diagnostics);
         }
@@ -102,15 +107,17 @@ fn collect_switch_cases(
             header_span,
             stmt,
         } => {
-            if data.case_set.contains(value) {
+            let casted_value = value.cast(data.value_ty);
+
+            if data.case_set.contains(&casted_value) {
                 diagnostics.analysis_error(
                     header_span.clone(),
-                    format!("duplicate case value {}", value.clone().i32()),
+                    format!("duplicate case value {}", value),
                 );
             }
 
-            data.case_set.insert(value.clone());
-            data.cases.push((label.clone(), value.clone()));
+            data.case_set.insert(casted_value);
+            data.cases.push((label.clone(), casted_value));
             collect_switch_cases(stmt, data, diagnostics);
         }
         StmtKind::DefaultCase {

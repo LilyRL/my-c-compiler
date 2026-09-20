@@ -1,5 +1,6 @@
 use crate::ir;
 use crate::lexer::Token;
+use crate::parser::{Constant, ConstantType};
 
 pub const CONDITIONAL_PRECEDENCE: u32 = 10;
 
@@ -17,10 +18,12 @@ impl IncDec {
         }
     }
 
-    pub fn n(self) -> i32 {
-        match self {
-            Self::Increment => 1,
-            Self::Decrement => -1,
+    pub fn n(self, ty: ConstantType) -> Constant {
+        match (self, ty) {
+            (Self::Increment, ConstantType::Int) => Constant::Int(1),
+            (Self::Increment, ConstantType::Long) => Constant::Long(1),
+            (Self::Decrement, ConstantType::Int) => Constant::Int(-1),
+            (Self::Decrement, ConstantType::Long) => Constant::Long(-1),
         }
     }
 }
@@ -86,6 +89,33 @@ impl UnaryOperator {
 impl BinaryOperator {
     pub fn is_assign(self) -> bool {
         matches!(self, Self::Assign)
+    }
+
+    pub fn is_logical(self) -> bool {
+        matches!(self, Self::And | Self::Or)
+    }
+
+    pub fn is_shift(self) -> bool {
+        matches!(self, Self::LeftShift | Self::RightShift)
+    }
+
+    pub fn is_arithmetic(self) -> bool {
+        matches!(
+            self,
+            Self::Add | Self::Subtract | Self::Multiply | Self::Divide | Self::Remainder
+        )
+    }
+
+    pub fn is_comparison(self) -> bool {
+        matches!(
+            self,
+            Self::Equal
+                | Self::NotEqual
+                | Self::LessThan
+                | Self::LessEqual
+                | Self::GreaterThan
+                | Self::GreaterEqual
+        )
     }
 
     pub fn precedence(self) -> u32 {

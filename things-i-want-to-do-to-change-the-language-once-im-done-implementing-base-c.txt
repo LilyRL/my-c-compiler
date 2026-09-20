@@ -1,9 +1,20 @@
+- function pointers (not in book)
+- type definitions (not in book), will be easy once we change grammar to be less awful
 - Constants can refer to other constants
 - methods on a struct with Impl that can take a pointer to self as the first
   arguement (or not!)
 - storage class must come before type, like strict order for specifiers instead
   of being able to write `int static i = 0`
 - tagged unions
+<<<<<<< HEAD
 - traits
 - define operators like in haskell
 - macros. but simpler than that. maybe they can just take arguments like a function, if you want them to. or of course source code. and emit with an emit keyword?
+=======
+- like how zig handles structs and stuff. really cool
+- logical integer type names
+- disambiguate grammar
+  - fn foo(bar: Baz) -> Baz;
+  - let x: i32 = 0;
+  - replace static/extern with pub priv in global scope
+>>>>>>> d362dd2 (chapter 11!!)
