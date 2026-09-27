@@ -137,6 +137,14 @@ impl Instruction {
                     }
 
                     _ => {
+                        let asm_operator = match (operator, is_signed) {
+                            (BinaryOperator::LeftShift, true) => codegen::BinaryOperator::Sal,
+                            (BinaryOperator::LeftShift, false) => codegen::BinaryOperator::Shl,
+                            (BinaryOperator::RightShift, true) => codegen::BinaryOperator::Sar,
+                            (BinaryOperator::RightShift, false) => codegen::BinaryOperator::Shr,
+                            _ => operator.lower(),
+                        };
+
                         instructions.push(codegen::Instruction::Mov {
                             ty,
                             src: lhs,
@@ -144,7 +152,7 @@ impl Instruction {
                         });
                         instructions.push(codegen::Instruction::Binary {
                             ty,
-                            operator: operator.lower(),
+                            operator: asm_operator,
                             src: rhs,
                             dst,
                         });
@@ -345,8 +353,6 @@ impl BinaryOperator {
             Self::Add => codegen::BinaryOperator::Add,
             Self::Subtract => codegen::BinaryOperator::Sub,
             Self::Multiply => codegen::BinaryOperator::Mul,
-            Self::LeftShift => codegen::BinaryOperator::LeftShift,
-            Self::RightShift => codegen::BinaryOperator::RightShift,
             Self::BitwiseAnd => codegen::BinaryOperator::BitwiseAnd,
             Self::BitwiseXor => codegen::BinaryOperator::BitwiseXor,
             Self::BitwiseOr => codegen::BinaryOperator::BitwiseOr,

@@ -4,7 +4,8 @@ from a const to a static init etc. these should be reduced as much as possible
 so there is little work to be done when a new type is added. it may be worth a
 complete refector to try to generate these things from a single source of truth,
 where we specify the name, size, alignment, and other properties and a macro or
-something generates the code for us.
+something generates the code for us. it doesnt seem like static init is required
+now but the book assures me it will be important once we implement further features.
 
 fix errors pointing to the wrong place after preprocessing. we dont do the
 preprocessing ourselves, so we only see the output preprocessed by GCC, this
@@ -16,10 +17,3 @@ for example a redeclaration error should point at both declarations, but the way
 diagnostics are set up at the moment, they can only have one span pointing to
 one line. we want to implement this in a way that it doesnt make it more verbose
 to report errors in the usual fashion.
-
-static initializers probably need reworking to be able to pass tests like this:
-    /* This should be initialized to -9223372036854775716,
-    * or 9223372036854775900 - 2^64
-    */
-    long l = 9223372036854775900u; // note: this has type unsigned long
-due to the `u` prefix, this is currently parsed as an unsigned int literal.

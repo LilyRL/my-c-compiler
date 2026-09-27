@@ -404,7 +404,7 @@ fn check_function_declaration(
             Type::Function(old) => {
                 new.defined = old.defined || has_body;
 
-                if old.parameters != new.parameters {
+                if old.parameters != new.parameters || old.return_type != new.return_type {
                     diagnostics.analysis_error(
                         decl.span.clone(),
                         format!(

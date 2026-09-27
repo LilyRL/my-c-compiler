@@ -156,8 +156,10 @@ pub enum BinaryOperator {
     Add,
     Sub,
     Mul,
-    LeftShift,
-    RightShift,
+    Sar, // arithmetic shift, used for signed values
+    Sal, // "
+    Shr, // logical shift, used for unsigned values
+    Shl, // "
     BitwiseAnd,
     BitwiseXor,
     BitwiseOr,
@@ -190,8 +192,10 @@ impl BinaryOperator {
             Self::Add => "add",
             Self::Sub => "sub",
             Self::Mul => "imul",
-            Self::LeftShift => "sal",
-            Self::RightShift => "sar",
+            Self::Sal => "sal",
+            Self::Sar => "sar",
+            Self::Shl => "shl",
+            Self::Shr => "shr",
             Self::BitwiseAnd => "and",
             Self::BitwiseXor => "xor",
             Self::BitwiseOr => "or",
@@ -204,10 +208,7 @@ impl BinaryOperator {
     }
 
     pub fn src_size(&self) -> Option<u32> {
-        match self {
-            Self::LeftShift | Self::RightShift => Some(1),
-            _ => None,
-        }
+        if self.is_shift() { Some(1) } else { None }
     }
 
     pub fn cant_have_double_memory(&self) -> bool {
@@ -230,7 +231,7 @@ impl BinaryOperator {
     }
 
     pub fn is_shift(&self) -> bool {
-        matches!(self, Self::LeftShift | Self::RightShift)
+        matches!(self, Self::Shr | Self::Shl | Self::Sar | Self::Sal)
     }
 
     #[must_use]

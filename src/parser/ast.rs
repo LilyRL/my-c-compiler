@@ -314,6 +314,15 @@ pub enum Constant {
 }
 
 impl Constant {
+    pub(crate) fn from_magnitude(magnitude: u128, ty: ConstantType) -> Self {
+        match ty {
+            ConstantType::Int => Constant::Int(magnitude as i32),
+            ConstantType::UInt => Constant::UInt(magnitude as u32),
+            ConstantType::Long => Constant::Long(magnitude as i64),
+            ConstantType::ULong => Constant::ULong(magnitude as u64),
+        }
+    }
+
     pub fn i64(&self) -> i64 {
         match self {
             Constant::Int(i) => *i as i64,

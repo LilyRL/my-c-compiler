@@ -4,17 +4,14 @@ use strum::EnumIs;
 
 use crate::{
     diagnostics::{Diagnostic, Stage},
-    parser::Specifier,
+    parser::{Constant, ConstantType, Specifier},
 };
 
 #[derive(Debug, PartialEq, Copy, Clone, EnumIs)]
 pub enum Token {
     Ident,
-    ConstantInt,
     Int,
-    ConstantLong,
-    ConstantUnsignedInt,
-    ConstantUnsignedLong,
+    Literal(Constant),
     Long,
     Void,
     Signed,
@@ -176,34 +173,28 @@ impl<'a> Lexer<'a> {
         while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
             self.pos += 1;
         }
+        let digits_end = self.pos;
 
         let suffix_start = self.pos;
         while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == b'_') {
             self.pos += 1;
         }
-        let suffix = &self.source[suffix_start..self.pos];
 
         let span = start..self.pos;
+        let text = &self.source[span.clone()];
 
-        let token = match suffix.to_ascii_lowercase().as_str() {
-            "" => Token::ConstantInt,
-            "l" => Token::ConstantLong,
-            "u" => Token::ConstantUnsignedInt,
-            "ul" | "lu" => Token::ConstantUnsignedLong,
-            _ => {
-                let text: String = self.source[start..self.pos]
-                    .chars()
-                    .map(|c| c.escape_debug().to_string())
-                    .collect();
-                return Err(Diagnostic::new(
-                    Stage::Lex,
-                    span,
-                    format!("invalid integer suffix on constant '{text}'"),
-                ));
-            }
-        };
+        // TODO: hex and octal and binary support arent done yet. i'll wait to see if they come up in the book
+        let constant = classify_integer(
+            &self.source[start..digits_end],
+            &self.source[suffix_start..self.pos],
+            true,
+        )
+        .map_err(|e| Diagnostic::new(Stage::Lex, span.clone(), e.message(text)))?;
 
-        Ok(SpannedToken { token, span })
+        Ok(SpannedToken {
+            token: Token::Literal(constant),
+            span,
+        })
     }
 
     fn lex_operator(&mut self, start: usize) -> Result<SpannedToken, Diagnostic> {
@@ -367,11 +358,13 @@ impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Token::Ident => "identifier",
-            Token::ConstantInt => "literal_int",
+            Token::Literal(c) => match c {
+                Constant::Int(_) => "literal_int",
+                Constant::Long(_) => "literal_long",
+                Constant::UInt(_) => "literal_unsigned_int",
+                Constant::ULong(_) => "literal_unsigned_long",
+            },
             Token::Int => "int",
-            Token::ConstantLong => "literal_long",
-            Token::ConstantUnsignedInt => "literal_unsigned_int",
-            Token::ConstantUnsignedLong => "literal_unsigned_long",
             Token::Long => "long",
             Token::Void => "void",
             Token::Signed => "signed",
@@ -435,4 +428,91 @@ impl Display for Token {
         };
         write!(f, "{}", s)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntSuffix {
+    None,
+    Long,
+    Unsigned,
+    UnsignedLong,
+}
+
+impl IntSuffix {
+    fn parse(suffix: &str) -> Result<Self, IntLiteralError> {
+        let mut has_l = false;
+        let mut has_u = false;
+        for c in suffix.chars() {
+            match c.to_ascii_lowercase() {
+                'l' if !has_l => has_l = true,
+                'u' if !has_u => has_u = true,
+                _ => return Err(IntLiteralError::BadSuffix(suffix.to_string())),
+            }
+        }
+        Ok(match (has_l, has_u) {
+            (false, false) => IntSuffix::None,
+            (true, false) => IntSuffix::Long,
+            (false, true) => IntSuffix::Unsigned,
+            (true, true) => IntSuffix::UnsignedLong,
+        })
+    }
+}
+
+fn constant_type_candidates(suffix: IntSuffix, decimal: bool) -> &'static [ConstantType] {
+    use ConstantType::*;
+    match (suffix, decimal) {
+        (IntSuffix::None, true) => &[Int, Long],
+        (IntSuffix::None, false) => &[Int, UInt, Long, ULong],
+        (IntSuffix::Unsigned, _) => &[UInt, ULong],
+        (IntSuffix::Long, _) => &[Long],
+        (IntSuffix::UnsignedLong, _) => &[ULong],
+    }
+}
+
+const fn max_value(ty: ConstantType) -> u128 {
+    match ty {
+        ConstantType::Int => i32::MAX as u128,
+        ConstantType::UInt => u32::MAX as u128,
+        ConstantType::Long => i64::MAX as u128,
+        ConstantType::ULong => u64::MAX as u128,
+    }
+}
+
+#[derive(Debug)]
+enum IntLiteralError {
+    BadSuffix(String),
+    TooLarge,
+}
+
+impl IntLiteralError {
+    fn message(&self, literal: &str) -> String {
+        match self {
+            Self::BadSuffix(suffix) => {
+                format!("invalid suffix '{suffix}' on integer constant '{literal}'")
+            }
+            Self::TooLarge => {
+                format!("integer constant '{literal}' is too large for any integer type")
+            }
+        }
+    }
+}
+
+fn classify_integer(
+    digits: &str,
+    suffix: &str,
+    decimal: bool,
+) -> Result<Constant, IntLiteralError> {
+    let suffix = IntSuffix::parse(suffix)?;
+
+    // u128 holds anything that fits in any type we support, so a parse
+    // failure means the value is out of range for every candidate.
+    // remember that negatives are lexed as a minus sign and then a positive literal
+    let magnitude: u128 = digits.parse().map_err(|_| IntLiteralError::TooLarge)?;
+
+    constant_type_candidates(suffix, decimal)
+        .iter()
+        .copied()
+        .find(|&ty| magnitude <= max_value(ty))
+        .map(|ty| Constant::from_magnitude(magnitude, ty))
+        .ok_or(IntLiteralError::TooLarge)
 }

@@ -390,7 +390,7 @@ impl Parser {
                 let Some(value) = self.constant() else {
                     let found = self.peek().copied().unwrap_or(Token::EndOfInput);
                     let span = self.peek_span_or_eof();
-                    self.error(span, expected_msg(Token::ConstantInt, found));
+                    self.error(span, expected_msg("an integer constant", found));
                     return None;
                 };
 
@@ -434,17 +434,12 @@ impl Parser {
     }
 
     fn constant(&mut self) -> Option<Constant> {
-        match self.peek()? {
-            Token::ConstantInt => {
-                self.next()?;
-                self.constant_int()
-            }
-            Token::ConstantLong => {
-                self.next()?;
-                self.constant_long()
-            }
-            _ => None,
-        }
+        let constant = match self.peek()? {
+            Token::Literal(c) => *c,
+            _ => return None,
+        };
+        self.next()?;
+        Some(constant)
     }
 
     /// consumes semicolon
@@ -579,27 +574,12 @@ impl Parser {
 
                 self.postfix(expr)
             }
-            Token::ConstantInt => {
+            Token::Literal(c) => {
                 // it doesnt make sense to have a postfix operator on a constant, but we look for it anyway,
                 // so that if this is done, we give a more useful error like "invalid lvalue", instead of "unexpected characters"
+                let constant = *c;
                 let span = self.current_spanned()?.span.clone();
-                let expr = Expression::new(ExprKind::Constant(self.constant_int()?), span);
-                self.postfix(expr)
-            }
-            Token::ConstantLong => {
-                // see above ^^^
-                let span = self.current_spanned()?.span.clone();
-                let expr = Expression::new(ExprKind::Constant(self.constant_long()?), span);
-                self.postfix(expr)
-            }
-            Token::ConstantUnsignedLong => {
-                let span = self.current_spanned()?.span.clone();
-                let expr = Expression::new(ExprKind::Constant(self.constant_ulong()?), span);
-                self.postfix(expr)
-            }
-            Token::ConstantUnsignedInt => {
-                let span = self.current_spanned()?.span.clone();
-                let expr = Expression::new(ExprKind::Constant(self.constant_uint()?), span);
+                let expr = Expression::new(ExprKind::Constant(constant), span);
                 self.postfix(expr)
             }
             Token::Hyphen => {
@@ -669,73 +649,6 @@ impl Parser {
         Some(expr)
     }
 
-    fn constant_uint(&mut self) -> Option<Constant> {
-        let span = self.current_spanned()?.span.clone();
-        let number_span = span.start..(span.end - 1);
-
-        match self.source[number_span].parse::<u32>() {
-            Ok(value) => Some(Constant::UInt(value)),
-            Err(_) => match self.source[span.clone()].parse::<u64>() {
-                Ok(value) => Some(Constant::ULong(value)),
-                Err(_) => {
-                    self.error(
-                        span,
-                        "unsigned integer constant is too large to fit in a 'uint'",
-                    );
-                    None
-                }
-            },
-        }
-    }
-
-    fn constant_ulong(&mut self) -> Option<Constant> {
-        let span = self.current_spanned()?.span.clone();
-        // remove l on the end
-        let number_span = span.start..(span.end - 2);
-
-        match self.source[number_span].parse::<u64>() {
-            Ok(value) => Some(Constant::ULong(value)),
-            Err(_) => {
-                self.error(
-                    span,
-                    "unsigned integer constant is too large to fit in a 'ulong'",
-                );
-                None
-            }
-        }
-    }
-
-    /// parses the constant at the current position without consuming anything
-    fn constant_int(&mut self) -> Option<Constant> {
-        let span = self.current_spanned()?.span.clone();
-
-        match self.source[span.clone()].parse::<i32>() {
-            Ok(value) => Some(Constant::Int(value)),
-            Err(_) => match self.source[span.clone()].parse::<i64>() {
-                Ok(value) => Some(Constant::Long(value)),
-                Err(_) => {
-                    self.error(span, "integer constant is too large to fit in an 'int'");
-                    None
-                }
-            },
-        }
-    }
-
-    /// parses the constant at the current position without consuming anything
-    fn constant_long(&mut self) -> Option<Constant> {
-        let span = self.current_spanned()?.span.clone();
-        // remove l on the end
-        let number_span = span.start..(span.end - 1);
-
-        match self.source[number_span].parse::<i64>() {
-            Ok(value) => Some(Constant::Long(value)),
-            Err(_) => {
-                self.error(span, "integer constant is too large to fit in a 'long'");
-                None
-            }
-        }
-    }
-
     fn ident(&mut self) -> Option<Identifier> {
         self.consume(Token::Ident)?;
 
@@ -752,7 +665,7 @@ impl Parser {
     }
 
     fn is_type_next(&mut self) -> bool {
-        matches!(self.peek(), Some(Token::Int | Token::Long))
+        self.peek().is_some_and(|s| s.is_type())
     }
 
     fn parse_type_list(&mut self, list: &mut Vec<Specifier>) -> Option<Type> {
