@@ -9,6 +9,7 @@ use clap::Parser;
 use diagnostics::{Diagnostic, report_all};
 use lexer::lex;
 use parser::parse;
+use sourcemap::LineMap;
 
 use crate::analysis::validate_program;
 
@@ -18,6 +19,7 @@ mod diagnostics;
 mod ir;
 mod lexer;
 mod parser;
+mod sourcemap;
 mod utils;
 
 #[derive(Parser, Debug)]
@@ -132,7 +134,9 @@ fn compile_pipeline(
     }
 
     let mut diagnostics = diagnostics::Diagnostics::new();
-    let mut symbols = validate_program(&mut program, &mut diagnostics);
+    let Some(mut symbols) = validate_program(&mut program, &mut diagnostics) else {
+        return Err(diagnostics.vec);
+    };
 
     if args.keep_intermediates {
         let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
@@ -175,7 +179,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let file_name = paths.input.to_string_lossy();
 
     let preproc = Command::new("gcc")
-        .args(["-E", "-P"])
+        .args(["-E"])
         .arg(&paths.input)
         .stdout(Stdio::piped())
         .output()?;
@@ -190,9 +194,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let preprocessed_source = String::from_utf8(preproc.stdout)?;
 
-    let asm_output = match compile_pipeline(&preprocessed_source, &args, &paths) {
+    let (line_map, display) = LineMap::new(&preprocessed_source);
+
+    let asm_output = match compile_pipeline(&display, &args, &paths) {
         Err(diagnostics) => {
-            report_all(&file_name, &preprocessed_source, &diagnostics);
+            report_all(&file_name, &display, &line_map, &diagnostics);
             return Err("compilation failed".into());
         }
         Ok(None) => return Ok(()),

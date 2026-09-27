@@ -2,6 +2,8 @@ use std::{fmt, ops::Range};
 
 use ariadne::{Color, Report, ReportKind, Source};
 
+use crate::sourcemap::LineMap;
+
 pub type Span = Range<usize>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,35 +126,52 @@ pub fn line_col(source: &str, offset: usize) -> (usize, usize) {
     (line, col)
 }
 
-pub fn report_all(file_name: &str, source: &str, diagnostics: &[Diagnostic]) {
-    for d in diagnostics {
-        let (line, col) = line_col(source, d.span().start);
+pub fn report_all(file_name: &str, source: &str, line_map: &LineMap, diagnostics: &[Diagnostic]) {
+    let rendered = format!("{file_name} (preprocessed)");
 
-        let mut report =
-            Report::build(ReportKind::Error, (file_name, d.span())).with_message(format!(
-                "{} error: {} (line {line}, column {col})",
-                d.stage, d.message
-            ));
+    for d in diagnostics {
+        let offset = d.span().start;
+
+        let where_ = match line_map.locate(source, offset) {
+            Some((file, line, col)) => format!("{file}:{line}:{col}"),
+            None => {
+                let (line, col) = line_col(source, offset);
+                format!("{file_name}:{line}:{col}")
+            }
+        };
+
+        let mut report = Report::build(ReportKind::Error, (&rendered, d.span()))
+            .with_message(format!("{} error: {} ({where_})", d.stage, d.message));
 
         for label in &d.labels {
-            let message = if label.message.is_empty() {
-                d.message.as_str()
+            let mut message = if label.message.is_empty() {
+                d.message.clone()
             } else {
-                label.message.as_str()
+                label.message.clone()
             };
 
             let colour = match label.kind {
-                LabelKind::Primary => Color::Red,
-                LabelKind::Secondary => Color::Blue,
+                LabelKind::Primary => {
+                    if let Some((file, line, _)) = line_map.locate(source, label.span.start) {
+                        message.push_str(&format!(" ({file}:{line})"));
+                    }
+                    Color::Red
+                }
+                LabelKind::Secondary => {
+                    if let Some((file, line, _)) = line_map.locate(source, label.span.start) {
+                        message.push_str(&format!(" ({file}:{line})"));
+                    }
+                    Color::Blue
+                }
             };
 
             report = report.with_label(
-                ariadne::Label::new((file_name, label.span.clone()))
+                ariadne::Label::new((&rendered, label.span.clone()))
                     .with_message(message)
                     .with_color(colour),
             );
         }
 
-        let _ = report.finish().print((file_name, Source::from(source)));
+        let _ = report.finish().print((&rendered, Source::from(source)));
     }
 }

@@ -109,7 +109,7 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> Option<Declaration> {
-        let start = self.i;
+        let start = self.peek_span()?.start;
 
         let (ty, storage_class) = {
             let mut specifiers = vec![];
@@ -118,7 +118,10 @@ impl Parser {
                 specifiers.push(s);
             }
 
-            let specifiers_span = start..self.i;
+            let specifiers_span = match specifiers.is_empty() {
+                true => start..start,
+                false => start..self.prev_span()?.end,
+            };
             self.type_and_storage_class(specifiers, specifiers_span)?
         };
 

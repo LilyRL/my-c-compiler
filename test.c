@@ -1,6 +1,6 @@
 
-unsigned int foo(void);
+#include "lib.c"
 
-unsigned long foo(void) { return 0; }
+unsigned int foo(void);
 
 int main(void) { return 0; }

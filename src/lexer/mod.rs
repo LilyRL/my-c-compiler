@@ -136,8 +136,26 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn skip_line(&mut self) {
+        while let Some(c) = self.peek() {
+            self.pos += 1;
+            if c == b'\n' {
+                break;
+            }
+        }
+    }
+
     fn next_token(&mut self) -> Result<SpannedToken, Diagnostic> {
-        self.skip_whitespace();
+        loop {
+            self.skip_whitespace();
+
+            if self.peek() == Some(b'#') {
+                self.skip_line();
+                continue;
+            }
+
+            break;
+        }
 
         let start = self.pos;
 

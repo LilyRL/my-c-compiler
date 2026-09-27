@@ -21,17 +21,22 @@ mod loops;
 mod switch;
 mod typechecking;
 
-pub fn validate_program(program: &mut Program, diagnostics: &mut Diagnostics) -> Symbols {
+pub fn validate_program(program: &mut Program, diagnostics: &mut Diagnostics) -> Option<Symbols> {
     add_return_zero(program);
     replace_compound_assign_with_assign_binary(program);
     resolve_all_identifiers(program, diagnostics);
     label_all_loops(program, diagnostics);
     rename_all_gotos(program);
     check_if_all_gotos_point_somewhere_valid(program, diagnostics);
+
+    if !diagnostics.is_empty() {
+        return None;
+    }
+
     let symbols = check_all_types(program, diagnostics);
     collect_all_switch_cases(program, diagnostics);
     check_for_nested_functions(program, diagnostics);
-    symbols
+    Some(symbols)
 }
 
 fn replace_compound_assign_with_assign_binary(program: &mut Program) {
