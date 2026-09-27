@@ -592,6 +592,16 @@ impl Parser {
                 let expr = Expression::new(ExprKind::Constant(self.constant_long()?), span);
                 self.postfix(expr)
             }
+            Token::ConstantUnsignedLong => {
+                let span = self.current_spanned()?.span.clone();
+                let expr = Expression::new(ExprKind::Constant(self.constant_ulong()?), span);
+                self.postfix(expr)
+            }
+            Token::ConstantUnsignedInt => {
+                let span = self.current_spanned()?.span.clone();
+                let expr = Expression::new(ExprKind::Constant(self.constant_uint()?), span);
+                self.postfix(expr)
+            }
             Token::Hyphen => {
                 let start = self.current_spanned()?.span.start;
                 self.unary(UnaryOperator::Negate, start)
@@ -659,6 +669,42 @@ impl Parser {
         Some(expr)
     }
 
+    fn constant_uint(&mut self) -> Option<Constant> {
+        let span = self.current_spanned()?.span.clone();
+        let number_span = span.start..(span.end - 1);
+
+        match self.source[number_span].parse::<u32>() {
+            Ok(value) => Some(Constant::UInt(value)),
+            Err(_) => match self.source[span.clone()].parse::<u64>() {
+                Ok(value) => Some(Constant::ULong(value)),
+                Err(_) => {
+                    self.error(
+                        span,
+                        "unsigned integer constant is too large to fit in a 'uint'",
+                    );
+                    None
+                }
+            },
+        }
+    }
+
+    fn constant_ulong(&mut self) -> Option<Constant> {
+        let span = self.current_spanned()?.span.clone();
+        // remove l on the end
+        let number_span = span.start..(span.end - 2);
+
+        match self.source[number_span].parse::<u64>() {
+            Ok(value) => Some(Constant::ULong(value)),
+            Err(_) => {
+                self.error(
+                    span,
+                    "unsigned integer constant is too large to fit in a 'ulong'",
+                );
+                None
+            }
+        }
+    }
+
     /// parses the constant at the current position without consuming anything
     fn constant_int(&mut self) -> Option<Constant> {
         let span = self.current_spanned()?.span.clone();
@@ -709,36 +755,51 @@ impl Parser {
         matches!(self.peek(), Some(Token::Int | Token::Long))
     }
 
-    fn parse_type_list(&mut self, list: &[&Specifier]) -> Option<Type> {
-        if list == [&Specifier::Int] {
-            Some(Type::Int)
-        } else if list == [&Specifier::Long]
-            || list == [&Specifier::Int, &Specifier::Long]
-            || list == [&Specifier::Long, &Specifier::Int]
-        {
+    fn parse_type_list(&mut self, list: &mut Vec<Specifier>) -> Option<Type> {
+        if list.is_empty() {
+            self.error(self.peek_span_or_eof(), "no type");
+            return None;
+        }
+
+        list.sort_unstable();
+        let original_len = list.len();
+        list.dedup();
+        let contains_duplicate = original_len != list.len();
+
+        if contains_duplicate {
+            self.error(self.peek_span_or_eof(), "duplicate type specifier");
+            return None;
+        }
+
+        if list.contains(&&Specifier::Signed) && list.contains(&&Specifier::Unsigned) {
+            self.error(
+                self.peek_span_or_eof(),
+                "signed and unsigned cannot be combined",
+            );
+            return None;
+        }
+
+        if list.contains(&&Specifier::Unsigned) && list.contains(&&Specifier::Long) {
+            Some(Type::ULong)
+        } else if list.contains(&&Specifier::Unsigned) {
+            Some(Type::UInt)
+        } else if list.contains(&&Specifier::Long) {
             Some(Type::Long)
         } else {
-            let span = self.peek_span_or_eof();
-            self.error(span, "invalid type specifiers");
-            None
+            Some(Type::Int)
         }
     }
 
     fn type_(&mut self) -> Option<Type> {
         match self.peek() {
-            Some(Token::Int) | Some(Token::Long) => {
-                let a = self.next()?.clone();
-                let b = self.peek()?;
-
-                match (a, b) {
-                    (Token::Int, Token::Long) | (Token::Long, Token::Int) => {
-                        self.next()?;
-                        Some(Type::Long)
-                    }
-                    (Token::Int, _) => Some(Type::Int),
-                    (Token::Long, _) => Some(Type::Long),
-                    _ => unreachable!(),
+            Some(Token::Int) | Some(Token::Long) | Some(Token::Signed) | Some(Token::Unsigned) => {
+                let mut type_specifiers = vec![];
+                while let Some(specifier) = self.peek().and_then(|s| s.specifier()) {
+                    type_specifiers.push(specifier);
+                    self.next()?;
                 }
+
+                self.parse_type_list(&mut type_specifiers)
             }
             a => {
                 let found = a.copied().unwrap_or(Token::EndOfInput);
@@ -762,14 +823,16 @@ impl Parser {
 
         for specifier in &specifiers {
             match specifier {
-                Specifier::Int => types.push(specifier),
-                Specifier::Long => types.push(specifier),
+                Specifier::Int => types.push(*specifier),
+                Specifier::Long => types.push(*specifier),
+                Specifier::Signed => types.push(*specifier),
+                Specifier::Unsigned => types.push(*specifier),
                 Specifier::Extern => storage_classes.push(specifier),
                 Specifier::Static => storage_classes.push(specifier),
             }
         }
 
-        let ty = self.parse_type_list(&types)?;
+        let ty = self.parse_type_list(&mut types)?;
 
         if storage_classes.len() > 1 {
             self.error(span, "Invalid storage class");

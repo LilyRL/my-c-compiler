@@ -8,6 +8,8 @@ impl Display for Expression {
             ExprKind::Constant(c) => match c {
                 Constant::Int(i) => write!(f, "{}", i),
                 Constant::Long(l) => write!(f, "{}", l),
+                Constant::UInt(u) => write!(f, "{}", u),
+                Constant::ULong(ul) => write!(f, "{}", ul),
             },
             ExprKind::Unary { operator, expr } => write!(f, "({} {})", operator.symbol(), expr),
             ExprKind::Binary { operator, lhs, rhs } => {

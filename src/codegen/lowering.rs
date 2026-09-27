@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::analysis::{StaticInit, get_identifiers};
+use crate::analysis::{StaticInit, Symbols};
 
 use super::*;
 
@@ -14,11 +14,11 @@ impl Display for AssemblyType {
 }
 
 impl crate::codegen::data::Program {
-    pub fn format(&self) -> String {
+    pub fn format(&self, symbols: &Symbols) -> String {
         let inner = self
             .0
             .iter()
-            .map(|f| f.format())
+            .map(|f| f.format(symbols))
             .collect::<Vec<_>>()
             .join("\n\n");
 
@@ -30,7 +30,7 @@ impl crate::codegen::data::Program {
 }
 
 impl FunctionDefinition {
-    pub fn format(&self) -> String {
+    pub fn format(&self, symbols: &Symbols) -> String {
         let name = self.name.0.to_string();
         // TODO: this should probably be a flag instead, so you can cross compile
         // there's some more stuff, grep for target_os
@@ -39,7 +39,7 @@ impl FunctionDefinition {
 
         let mut lines = Vec::new();
         for instruction in &self.instructions {
-            instruction.format(&mut lines);
+            instruction.format(symbols, &mut lines);
         }
 
         let instructions = lines.join("\n");
@@ -87,6 +87,8 @@ impl StaticVariable {
             let decl = match self.init {
                 StaticInit::Int(i) => format!(".long {i}"),
                 StaticInit::Long(i) => format!(".quad {i}"),
+                StaticInit::UInt(i) => format!(".long {i}"),
+                StaticInit::ULong(i) => format!(".quad {i}"),
             };
 
             format!(
@@ -103,16 +105,16 @@ impl StaticVariable {
 }
 
 impl TopLevel {
-    pub fn format(&self) -> String {
+    pub fn format(&self, symbols: &Symbols) -> String {
         match self {
-            Self::F(func) => func.format(),
+            Self::F(func) => func.format(symbols),
             Self::V(var) => var.format(),
         }
     }
 }
 
 impl Instruction {
-    pub fn format(&self, lines: &mut Vec<String>) {
+    pub fn format(&self, symbols: &Symbols, lines: &mut Vec<String>) {
         match self {
             Self::Mov { src, dst, ty } => lines.push(format!(
                 "    mov{ty} {}, {}",
@@ -148,6 +150,13 @@ impl Instruction {
                     dst.format(ty.size_bytes())
                 ))
             }
+            Self::ZeroOut(ty, operand) => {
+                let o = operand.format(ty.size_bytes());
+                lines.push(format!("    xor{ty} {}, {}", &o, o));
+            }
+            Self::Div(ty, operand) => {
+                lines.push(format!("    div{ty} {}", operand.format(ty.size_bytes())));
+            }
             Self::Idiv(ty, operand) => {
                 lines.push(format!("    idiv{ty} {}", operand.format(ty.size_bytes())));
             }
@@ -182,7 +191,13 @@ impl Instruction {
             }
             Self::Comment(c) => lines.push(format!("    # {}", c)),
             Self::Call(name) => {
-                if get_identifiers().get(name).unwrap().defined {
+                // need to append @PLT on linux if its defined somewhere else
+                let is_defined = symbols
+                    .get(name)
+                    .expect("call target must have a symbol")
+                    .attributes
+                    .defined();
+                if is_defined {
                     #[cfg(target_os = "macos")]
                     lines.push(format!("    call _{}", name));
                     #[cfg(target_os = "linux")]
@@ -199,6 +214,10 @@ impl Instruction {
             }
             Self::Movsx { src, dst } => {
                 lines.push(format!("    movslq {}, {}", src.format(4), dst.format(8)));
+            }
+            // removed during fixups, rewrite_invalid_constant_operands
+            Self::Movzx { .. } => {
+                unreachable!()
             }
         }
     }

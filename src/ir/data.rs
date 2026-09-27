@@ -1,7 +1,7 @@
 use strum::IntoDiscriminant;
 
 use crate::{
-    analysis::{StaticInit, Type, get_symbols},
+    analysis::{StaticInit, Symbols, Type},
     codegen::AssemblyType,
     parser::{Constant, ConstantType, FunctionParameter, Identifier},
 };
@@ -73,6 +73,10 @@ pub enum Instruction {
         src: Value,
         dst: Value,
     },
+    ZeroExtend {
+        src: Value,
+        dst: Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -109,25 +113,23 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn ty(&self) -> Type {
+    pub fn ty(&self, symbols: &Symbols) -> Type {
         match self {
             Value::Constant(c) => c.ty(),
-            Value::Var(i) => get_symbols().get(i).unwrap().ty.clone(),
+            Value::Var(i) => symbols.get(i).unwrap().ty.clone(),
         }
     }
 
-    pub fn const_ty(&self) -> Option<ConstantType> {
+    pub fn const_ty(&self, symbols: &Symbols) -> Option<ConstantType> {
         match self {
             Value::Constant(c) => Some(c.discriminant()),
-            Value::Var(i) => get_symbols().get(i).unwrap().ty.to_constant(),
+            Value::Var(i) => symbols.get(i).unwrap().ty.to_constant(),
         }
     }
 
-    pub fn asm_type(&self) -> AssemblyType {
-        match self.ty() {
-            Type::Int => AssemblyType::Longword,
-            Type::Long => AssemblyType::Quadword,
-            Type::Function(_) => unimplemented!(),
-        }
+    pub fn asm_type(&self, symbols: &Symbols) -> AssemblyType {
+        self.ty(symbols)
+            .to_asm_type()
+            .expect("functions are never used as values")
     }
 }

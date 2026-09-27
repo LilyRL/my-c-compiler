@@ -12,8 +12,7 @@ use declarations::resolve_all_identifiers;
 use loops::label_all_loops;
 use switch::collect_all_switch_cases;
 
-pub use declarations::get_identifiers;
-pub use typechecking::{IdentifierAttributes, InitialValue, StaticInit, Symbol, Type, get_symbols};
+pub use typechecking::{IdentifierAttributes, InitialValue, StaticInit, Symbol, Symbols, Type};
 
 mod declarations;
 mod functions;
@@ -22,16 +21,17 @@ mod loops;
 mod switch;
 mod typechecking;
 
-pub fn validate_program(program: &mut Program, diagnostics: &mut Diagnostics) {
+pub fn validate_program(program: &mut Program, diagnostics: &mut Diagnostics) -> Symbols {
     add_return_zero(program);
     replace_compound_assign_with_assign_binary(program);
     resolve_all_identifiers(program, diagnostics);
     label_all_loops(program, diagnostics);
     rename_all_gotos(program);
     check_if_all_gotos_point_somewhere_valid(program, diagnostics);
-    check_all_types(program, diagnostics);
+    let symbols = check_all_types(program, diagnostics);
     collect_all_switch_cases(program, diagnostics);
     check_for_nested_functions(program, diagnostics);
+    symbols
 }
 
 fn replace_compound_assign_with_assign_binary(program: &mut Program) {

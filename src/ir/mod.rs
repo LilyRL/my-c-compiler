@@ -9,6 +9,7 @@ use crate::{analysis::StaticInit, parser::Constant};
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ZeroExtend { src, dst } => write!(f, "\t{} = zero_extend({});", dst, src),
             Self::SignExtend { src, dst } => write!(f, "\t{} = sign_extend({});", dst, src),
             Self::Truncate { src, dst } => write!(f, "\t{} = truncate({});", dst, src),
             Self::Return(value) => write!(f, "\treturn {};", value),
@@ -86,6 +87,8 @@ impl Display for StaticInit {
         match self {
             Self::Int(i) => write!(f, "{}", i),
             Self::Long(l) => write!(f, "{}", l),
+            Self::UInt(u) => write!(f, "{}", u),
+            Self::ULong(ul) => write!(f, "{}", ul),
         }
     }
 }
@@ -95,6 +98,8 @@ impl Display for Constant {
         match self {
             Self::Int(i) => write!(f, "{}", i),
             Self::Long(l) => write!(f, "{}", l),
+            Self::UInt(u) => write!(f, "{}", u),
+            Self::ULong(ul) => write!(f, "{}", ul),
         }
     }
 }

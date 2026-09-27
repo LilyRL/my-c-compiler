@@ -1,13 +1,8 @@
-use std::collections::HashMap;
-
 use super::*;
 
 use crate::{
-    analysis::{Type, get_symbols},
-    codegen::{
-        self, AsmSymbol, AsmSymbols, AssemblyType, CondCode, Operand, Register,
-        set_asm_symbol_table,
-    },
+    analysis::Symbols,
+    codegen::{self, AX, AssemblyType, CondCode, DX, Operand, Register},
 };
 
 const ARG_REGISTERS: [Register; 6] = {
@@ -25,11 +20,11 @@ impl Value {
 }
 
 impl Instruction {
-    pub fn lower(self, instructions: &mut Vec<codegen::Instruction>) {
+    pub fn lower(self, symbols: &Symbols, instructions: &mut Vec<codegen::Instruction>) {
         match self {
             Self::Return(val) => {
                 instructions.push(codegen::Instruction::Mov {
-                    ty: val.asm_type(),
+                    ty: val.asm_type(symbols),
                     src: val.lower(),
                     dst: codegen::Operand::Reg(Register::Ax),
                 });
@@ -40,9 +35,9 @@ impl Instruction {
                 src,
                 dst,
             } => {
-                let ty = src.asm_type();
+                let ty = src.asm_type(symbols);
                 let src = src.lower();
-                let dst_ty = dst.asm_type();
+                let dst_ty = dst.asm_type(symbols);
                 let dst = dst.lower();
 
                 instructions.push(codegen::Instruction::Cmp(ty, Operand::Imm(0), src));
@@ -54,7 +49,7 @@ impl Instruction {
                 instructions.push(codegen::Instruction::SetCC(CondCode::Eq, dst));
             }
             Self::Unary { operator, src, dst } => {
-                let ty = dst.asm_type();
+                let ty = dst.asm_type(symbols);
                 let dst = dst.lower();
                 instructions.push(codegen::Instruction::Mov {
                     ty,
@@ -73,8 +68,9 @@ impl Instruction {
                 rhs,
                 dst,
             } => {
-                let ty = lhs.asm_type();
-                let dst_ty = dst.asm_type();
+                let is_signed = lhs.ty(symbols).is_signed();
+                let ty = lhs.asm_type(symbols);
+                let dst_ty = dst.asm_type(symbols);
                 let dst = dst.lower();
                 let lhs = lhs.lower();
                 let rhs = rhs.lower();
@@ -83,16 +79,24 @@ impl Instruction {
                     BinaryOperator::Divide | BinaryOperator::Remainder => {
                         let register = match operator {
                             BinaryOperator::Divide => Register::Ax,
-                            _ => Register::Dx,
+                            BinaryOperator::Remainder => Register::Dx,
+                            _ => unreachable!(),
                         };
 
                         instructions.push(codegen::Instruction::Mov {
                             ty,
                             src: lhs,
-                            dst: Operand::Reg(Register::Ax),
+                            dst: AX,
                         });
-                        instructions.push(codegen::Instruction::Cdq(ty));
-                        instructions.push(codegen::Instruction::Idiv(ty, rhs));
+
+                        if is_signed {
+                            instructions.push(codegen::Instruction::Cdq(ty));
+                            instructions.push(codegen::Instruction::Idiv(ty, rhs));
+                        } else {
+                            instructions.push(codegen::Instruction::ZeroOut(ty, DX));
+                            instructions.push(codegen::Instruction::Div(ty, rhs));
+                        }
+
                         instructions.push(codegen::Instruction::Mov {
                             ty,
                             src: Operand::Reg(register),
@@ -105,13 +109,22 @@ impl Instruction {
                     | BinaryOperator::LessEqual
                     | BinaryOperator::Equal
                     | BinaryOperator::NotEqual => {
-                        let cond_code = match operator {
-                            BinaryOperator::GreaterThan => CondCode::Gt,
-                            BinaryOperator::LessThan => CondCode::Lt,
-                            BinaryOperator::GreaterEqual => CondCode::Ge,
-                            BinaryOperator::LessEqual => CondCode::Le,
-                            BinaryOperator::Equal => CondCode::Eq,
-                            _ => CondCode::Ne,
+                        let cond_code = match (operator, is_signed) {
+                            (BinaryOperator::GreaterThan, true) => CondCode::Gt,
+                            (BinaryOperator::GreaterThan, false) => CondCode::A,
+
+                            (BinaryOperator::GreaterEqual, true) => CondCode::Ge,
+                            (BinaryOperator::GreaterEqual, false) => CondCode::Ae,
+
+                            (BinaryOperator::LessThan, true) => CondCode::Lt,
+                            (BinaryOperator::LessThan, false) => CondCode::B,
+
+                            (BinaryOperator::LessEqual, true) => CondCode::Le,
+                            (BinaryOperator::LessEqual, false) => CondCode::Be,
+
+                            (BinaryOperator::Equal, _) => CondCode::Eq,
+                            (BinaryOperator::NotEqual, _) => CondCode::Ne,
+                            _ => unreachable!(),
                         };
 
                         instructions.push(codegen::Instruction::Cmp(ty, rhs, lhs));
@@ -140,26 +153,26 @@ impl Instruction {
             }
             Self::Jump(label) => instructions.push(codegen::Instruction::Jump(label)),
             Self::JumpIfZero { condition, target } => {
-                let ty = condition.asm_type();
+                let ty = condition.asm_type(symbols);
                 let condition = condition.lower();
                 instructions.push(codegen::Instruction::Cmp(ty, Operand::Imm(0), condition));
                 instructions.push(codegen::Instruction::JumpCC(CondCode::Eq, target))
             }
             Self::JumpNotZero { condition, target } => {
-                let ty = condition.asm_type();
+                let ty = condition.asm_type(symbols);
                 let cond = condition.lower();
                 instructions.push(codegen::Instruction::Cmp(ty, Operand::Imm(0), cond));
                 instructions.push(codegen::Instruction::JumpCC(CondCode::Ne, target))
             }
             Self::Label(label) => instructions.push(codegen::Instruction::Label(label)),
             Self::Copy { src, dst } => instructions.push(codegen::Instruction::Mov {
-                ty: src.asm_type(),
+                ty: src.asm_type(symbols),
                 src: src.lower(),
                 dst: dst.lower(),
             }),
             Self::Comment(c) => instructions.push(codegen::Instruction::Comment(c)),
             Self::FunctionCall { name, args, dst } => {
-                let ty = dst.asm_type();
+                let ty = dst.asm_type(symbols);
                 let mut register_args = Vec::with_capacity(args.len().min(6));
                 let mut stack_args = Vec::with_capacity(args.len().saturating_sub(6));
                 for (i, arg) in args.into_iter().enumerate() {
@@ -171,6 +184,7 @@ impl Instruction {
                 }
 
                 // TODO: this assumes that all values are 32 bits, fine for now but always be on the lookout
+                // comment above makes it sound like this shouldn't be working but it is. im going to leave it for now
                 let stack_padding = if stack_args.len().is_multiple_of(2) {
                     0
                 } else {
@@ -185,7 +199,7 @@ impl Instruction {
 
                 for (i, tacky_arg) in register_args.into_iter().enumerate() {
                     let r = ARG_REGISTERS[i];
-                    let arg_ty = tacky_arg.asm_type();
+                    let arg_ty = tacky_arg.asm_type(symbols);
                     let assembly_arg = tacky_arg.lower();
                     instructions.push(codegen::Instruction::Mov {
                         ty: arg_ty,
@@ -195,7 +209,7 @@ impl Instruction {
                 }
 
                 for tacky_arg in stack_args.into_iter().rev() {
-                    let asm_type = tacky_arg.asm_type();
+                    let asm_type = tacky_arg.asm_type(symbols);
                     let assembly_arg = tacky_arg.lower();
                     if matches!(assembly_arg, Operand::Reg(_) | Operand::Imm(_))
                         || asm_type == AssemblyType::Quadword
@@ -239,12 +253,18 @@ impl Instruction {
                     dst,
                 });
             }
+            Self::ZeroExtend { src, dst } => {
+                let src = src.lower();
+                let dst = dst.lower();
+
+                instructions.push(codegen::Instruction::Movzx { src, dst });
+            }
         }
     }
 }
 
 impl FunctionDefinition {
-    pub fn lower(self) -> codegen::FunctionDefinition {
+    pub fn lower(self, symbols: &Symbols) -> codegen::FunctionDefinition {
         let mut instructions = vec![];
         let FunctionDefinition {
             name,
@@ -272,7 +292,7 @@ impl FunctionDefinition {
         }
 
         for instruction in body {
-            instruction.lower(&mut instructions);
+            instruction.lower(symbols, &mut instructions);
         }
 
         codegen::FunctionDefinition {
@@ -295,38 +315,15 @@ impl StaticVariable {
 }
 
 impl Program {
-    pub fn lower(self) -> codegen::Program {
-        let program = codegen::Program(self.0.into_iter().map(|f| f.lower()).collect());
-
-        let frontend_symbols = get_symbols();
-        let mut backend_symbols: AsmSymbols = HashMap::new();
-
-        for (i, symbol) in frontend_symbols.iter() {
-            let symbol = match &symbol.ty {
-                Type::Int => AsmSymbol::Object {
-                    ty: AssemblyType::Longword,
-                    is_static: symbol.attributes.is_static(),
-                },
-                Type::Long => AsmSymbol::Object {
-                    ty: AssemblyType::Quadword,
-                    is_static: symbol.attributes.is_static(),
-                },
-                Type::Function(f) => AsmSymbol::Function { defined: f.defined },
-            };
-
-            backend_symbols.insert(i.clone(), symbol);
-        }
-
-        set_asm_symbol_table(backend_symbols);
-
-        program
+    pub fn lower(self, symbols: &Symbols) -> codegen::Program {
+        codegen::Program(self.0.into_iter().map(|f| f.lower(symbols)).collect())
     }
 }
 
 impl TopLevel {
-    pub fn lower(self) -> codegen::TopLevel {
+    pub fn lower(self, symbols: &Symbols) -> codegen::TopLevel {
         match self {
-            Self::F(f) => codegen::TopLevel::F(f.lower()),
+            Self::F(f) => codegen::TopLevel::F(f.lower(symbols)),
             Self::V(v) => codegen::TopLevel::V(v.lower()),
         }
     }

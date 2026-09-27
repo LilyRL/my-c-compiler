@@ -131,24 +131,22 @@ fn compile_pipeline(
         return Ok(None);
     }
 
-    {
-        let mut diagnostics = diagnostics::Diagnostics::new();
-        validate_program(&mut program, &mut diagnostics);
+    let mut diagnostics = diagnostics::Diagnostics::new();
+    let mut symbols = validate_program(&mut program, &mut diagnostics);
 
-        if args.keep_intermediates {
-            let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
-        }
+    if args.keep_intermediates {
+        let _ = fs::write(&paths.parsed_ast, format!("{:#?}", program));
+    }
 
-        if !diagnostics.is_empty() {
-            return Err(diagnostics.vec);
-        }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics.vec);
     }
 
     if args.validate {
         return Ok(None);
     }
 
-    let tacky_program = program.lower();
+    let tacky_program = program.lower(&mut symbols);
     if args.tacky {
         println!("{tacky_program}");
         return Ok(None);
@@ -159,8 +157,8 @@ fn compile_pipeline(
         let _ = fs::write(&paths.ir_extra, format!("{:#?}", tacky_program));
     }
 
-    let mut asm_program = tacky_program.lower();
-    codegen::transform(&mut asm_program);
+    let mut asm_program = tacky_program.lower(&symbols);
+    codegen::transform(&mut asm_program, &symbols);
 
     if args.codegen {
         println!("{:#?}", asm_program);
@@ -168,7 +166,7 @@ fn compile_pipeline(
         return Ok(None);
     }
 
-    Ok(Some(asm_program.format()))
+    Ok(Some(asm_program.format(&symbols)))
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {

@@ -16,14 +16,32 @@ use crate::{
 pub enum Type {
     Int,
     Long,
+    UInt,
+    ULong,
     Function(Box<FunctionType>),
 }
 
 impl Type {
+    pub fn is_signed(&self) -> bool {
+        match self {
+            Type::Int | Type::Long => true,
+            Type::UInt | Type::ULong => false,
+            Type::Function(_) => true,
+        }
+    }
+
+    pub fn size_bytes(&self) -> u32 {
+        match self {
+            Type::Int | Type::UInt => 4,
+            Type::Long | Type::ULong => 8,
+            Type::Function(_) => 8,
+        }
+    }
+
     pub fn alignment(&self) -> u32 {
         match self {
-            Type::Int => 4,
-            Type::Long => 8,
+            Type::Int | Type::UInt => 4,
+            Type::Long | Type::ULong => 8,
             Type::Function(_) => 8,
         }
     }
@@ -32,14 +50,16 @@ impl Type {
         match self {
             Type::Int => Some(ConstantType::Int),
             Type::Long => Some(ConstantType::Long),
+            Type::UInt => Some(ConstantType::UInt),
+            Type::ULong => Some(ConstantType::ULong),
             _ => None,
         }
     }
 
     pub fn to_asm_type(&self) -> Option<crate::codegen::AssemblyType> {
         match self {
-            Type::Int => Some(crate::codegen::AssemblyType::Longword),
-            Type::Long => Some(crate::codegen::AssemblyType::Quadword),
+            Type::Int | Type::UInt => Some(crate::codegen::AssemblyType::Longword),
+            Type::Long | Type::ULong => Some(crate::codegen::AssemblyType::Quadword),
             _ => None,
         }
     }
@@ -58,6 +78,14 @@ impl IdentifierAttributes {
             IdentifierAttributes::Function { global, .. } => *global,
             IdentifierAttributes::Static { global, .. } => *global,
             IdentifierAttributes::Local => false,
+        }
+    }
+
+    pub fn defined(&self) -> bool {
+        match self {
+            IdentifierAttributes::Function { defined, .. } => *defined,
+            IdentifierAttributes::Static { .. } => true,
+            IdentifierAttributes::Local => true,
         }
     }
 
@@ -81,7 +109,9 @@ pub enum InitialValue {
 #[strum_discriminants(name(StaticIntType))]
 pub enum StaticInit {
     Int(i32),
+    UInt(u32),
     Long(i64),
+    ULong(u64),
 }
 
 impl StaticInit {
@@ -89,6 +119,8 @@ impl StaticInit {
         match self {
             StaticInit::Int(_) => 4,
             StaticInit::Long(_) => 8,
+            StaticInit::UInt(_) => 4,
+            StaticInit::ULong(_) => 8,
         }
     }
 
@@ -96,6 +128,8 @@ impl StaticInit {
         match self {
             StaticInit::Int(i) => *i == 0,
             StaticInit::Long(l) => *l == 0,
+            StaticInit::UInt(u) => *u == 0,
+            StaticInit::ULong(ul) => *ul == 0,
         }
     }
 
@@ -103,6 +137,8 @@ impl StaticInit {
         match constant {
             Constant::Int(i) => Some(StaticInit::Int(*i)),
             Constant::Long(l) => Some(StaticInit::Long(*l)),
+            Constant::UInt(u) => Some(StaticInit::UInt(*u)),
+            Constant::ULong(ul) => Some(StaticInit::ULong(*ul)),
         }
     }
 
@@ -110,6 +146,8 @@ impl StaticInit {
         match self {
             StaticInit::Int(i) => Constant::Int(*i),
             StaticInit::Long(l) => Constant::Long(*l),
+            StaticInit::UInt(u) => Constant::UInt(*u),
+            StaticInit::ULong(ul) => Constant::ULong(*ul),
         }
     }
 
@@ -117,8 +155,20 @@ impl StaticInit {
         match (self, ty) {
             (StaticInit::Int(i), StaticIntType::Int) => StaticInit::Int(i),
             (StaticInit::Int(i), StaticIntType::Long) => StaticInit::Long(i as i64),
+            (StaticInit::Int(i), StaticIntType::UInt) => StaticInit::UInt(i as u32),
+            (StaticInit::Int(i), StaticIntType::ULong) => StaticInit::ULong(i as u64),
             (StaticInit::Long(l), StaticIntType::Int) => StaticInit::Int(l as i32),
             (StaticInit::Long(l), StaticIntType::Long) => StaticInit::Long(l),
+            (StaticInit::Long(l), StaticIntType::UInt) => StaticInit::UInt(l as u32),
+            (StaticInit::Long(l), StaticIntType::ULong) => StaticInit::ULong(l as u64),
+            (StaticInit::UInt(u), StaticIntType::Int) => StaticInit::Int(u as i32),
+            (StaticInit::UInt(u), StaticIntType::Long) => StaticInit::Long(u as i64),
+            (StaticInit::UInt(u), StaticIntType::UInt) => StaticInit::UInt(u),
+            (StaticInit::UInt(u), StaticIntType::ULong) => StaticInit::ULong(u as u64),
+            (StaticInit::ULong(ul), StaticIntType::Int) => StaticInit::Int(ul as i32),
+            (StaticInit::ULong(ul), StaticIntType::Long) => StaticInit::Long(ul as i64),
+            (StaticInit::ULong(ul), StaticIntType::UInt) => StaticInit::UInt(ul as u32),
+            (StaticInit::ULong(ul), StaticIntType::ULong) => StaticInit::ULong(ul),
         }
     }
 }
@@ -127,6 +177,12 @@ impl StaticInit {
 pub struct Symbol {
     pub attributes: IdentifierAttributes,
     pub ty: Type,
+}
+
+impl Symbol {
+    pub fn asm_type(&self) -> Option<crate::codegen::AssemblyType> {
+        self.ty.to_asm_type()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -143,13 +199,14 @@ impl FunctionType {
 }
 
 pub type Symbols = HashMap<Identifier, Symbol>;
-sge_global::global!(Symbols, symbols);
 
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Type::Int => write!(f, "int"),
             Type::Long => write!(f, "long"),
+            Type::UInt => write!(f, "unsigned int"),
+            Type::ULong => write!(f, "unsigned long"),
             Type::Function(func) => {
                 write!(f, "int(")?;
 
@@ -170,7 +227,7 @@ impl Display for Type {
     }
 }
 
-pub fn check_all_types(program: &mut Program, diagnostics: &mut Diagnostics) {
+pub fn check_all_types(program: &mut Program, diagnostics: &mut Diagnostics) -> Symbols {
     let mut symbols = Symbols::new();
 
     for declaration in &mut program.0 {
@@ -182,7 +239,7 @@ pub fn check_all_types(program: &mut Program, diagnostics: &mut Diagnostics) {
         }
     }
 
-    set_symbols(symbols);
+    symbols
 }
 
 fn check_variable_declaration(
@@ -228,22 +285,10 @@ fn check_local_variable(
             );
         }
     } else if decl.storage_class.is_static() {
-        let initial_value;
-        if let Some(Some(constant)) = decl.init.as_ref().map(|i| i.eval())
-            && let Some(static_int) = StaticInit::from_constant(&constant)
-        {
-            let const_ty = match decl.ty {
-                Type::Int => StaticIntType::Int,
-                Type::Long => StaticIntType::Long,
-                Type::Function(_) => unreachable!("local var can't have function type"),
-            };
-            initial_value = InitialValue::Constant(static_int.cast(const_ty));
-        } else if decl.init.is_none() {
-            initial_value = InitialValue::Tentitive;
-        } else {
-            diagnostics.analysis_error(decl.span.clone(), "initializer is not a constant integer");
-            return;
-        }
+        let initial_value = match resolve_init(decl, diagnostics, Scope::Local) {
+            Some(value) => value,
+            None => return,
+        };
 
         symbols.insert(
             decl.name.clone(),
@@ -276,26 +321,10 @@ fn check_global_variable_declaration(
     symbols: &mut Symbols,
     diagnostics: &mut Diagnostics,
 ) {
-    let mut initial_value;
-    if let Some(init) = &decl.init {
-        if let Some(constant) = init.eval()
-            && let Some(static_int) = StaticInit::from_constant(&constant)
-        {
-            let const_ty = match decl.ty {
-                Type::Int => StaticIntType::Int,
-                Type::Long => StaticIntType::Long,
-                Type::Function(_) => unreachable!("global var can't have function type"),
-            };
-            initial_value = InitialValue::Constant(static_int.cast(const_ty));
-        } else {
-            diagnostics.analysis_error(decl.span.clone(), "initializer is not a constant int");
-            return;
-        }
-    } else if decl.storage_class.is_extern() {
-        initial_value = InitialValue::None;
-    } else {
-        initial_value = InitialValue::Tentitive;
-    }
+    let mut initial_value = match resolve_init(decl, diagnostics, Scope::Global) {
+        Some(value) => value,
+        None => return,
+    };
 
     let mut is_global = !decl.storage_class.is_static();
 
@@ -461,10 +490,9 @@ fn check_expression(
 
             expr.ty = v_ty.clone();
         }
-        ExprKind::Constant(c) => match c {
-            Constant::Int(_) => expr.ty = Type::Int,
-            Constant::Long(_) => expr.ty = Type::Long,
-        },
+        ExprKind::Constant(c) => {
+            expr.ty = c.ty();
+        }
         ExprKind::Cast {
             target_type,
             expr: inner,
@@ -596,7 +624,17 @@ fn convert_to(expr: &mut Expression, ty: Type) {
 }
 
 fn get_common_type(a: Type, b: Type) -> Type {
-    if a == b { a } else { Type::Long }
+    if a == b {
+        a
+    } else if a.size_bytes() == b.size_bytes() {
+        if a.is_signed() { b } else { a }
+    } else {
+        if a.size_bytes() > b.size_bytes() {
+            a
+        } else {
+            b
+        }
+    }
 }
 
 fn check_block(
@@ -692,5 +730,39 @@ fn check_statement(
             check_statement(stmt, symbols, diagnostics, function_return_type)
         }
         StmtKind::Null | StmtKind::Break(_) | StmtKind::Continue(_) | StmtKind::Goto(_) => {}
+    }
+}
+
+fn resolve_init(
+    decl: &VariableDeclaration,
+    diagnostics: &mut Diagnostics,
+    scope: Scope,
+) -> Option<InitialValue> {
+    if let Some(expr) = &decl.init {
+        match expr.eval() {
+            Ok(constant) => {
+                if let Some(static_int) = StaticInit::from_constant(&constant) {
+                    let const_ty = match decl.ty {
+                        Type::Int => StaticIntType::Int,
+                        Type::Long => StaticIntType::Long,
+                        Type::UInt => StaticIntType::UInt,
+                        Type::ULong => StaticIntType::ULong,
+                        Type::Function(_) => unreachable!("local var can't have function type"),
+                    };
+                    Some(InitialValue::Constant(static_int.cast(const_ty)))
+                } else {
+                    diagnostics.analysis_error(decl.span.clone(), "initializer is not an integer");
+                    None
+                }
+            }
+            Err(e) => {
+                diagnostics.analysis_error(decl.span.clone(), e);
+                None
+            }
+        }
+    } else if scope.is_global() && decl.storage_class.is_extern() {
+        Some(InitialValue::None)
+    } else {
+        Some(InitialValue::Tentitive)
     }
 }

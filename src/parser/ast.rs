@@ -1,4 +1,8 @@
-use std::{collections::HashSet, fmt::Display};
+use std::{
+    collections::HashSet,
+    fmt::Display,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use strum::{EnumDiscriminants, EnumIs, IntoDiscriminant};
 
@@ -37,10 +41,12 @@ pub struct FunctionDeclaration {
     pub return_type: Type,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub enum Specifier {
     Int,
     Long,
+    Unsigned,
+    Signed,
     Static,
     Extern,
 }
@@ -92,6 +98,8 @@ pub enum StorageClass {
     None,
 }
 
+static IDENT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 #[derive(Debug, Clone, Hash, PartialEq, PartialOrd, Ord, Eq)]
 pub struct Identifier(pub String, pub String);
 
@@ -102,15 +110,18 @@ impl Display for Identifier {
 }
 
 impl Identifier {
-    fn rand() -> String {
-        (0..4).map(|_| rand::random_range('a'..'z')).collect()
+    fn next() -> String {
+        let n = IDENT_COUNTER.load(Ordering::Relaxed);
+        IDENT_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        n.to_string()
     }
 
     pub fn new(name: impl Display) -> Self {
         #[cfg(target_os = "linux")]
-        return Self(format!(".L_{name}__{}", Self::rand()), name.to_string());
+        return Self(format!(".L_{name}__{}", Self::next()), name.to_string());
         #[cfg(target_os = "macos")]
-        return Self(format!("L_{name}__{}", Self::rand()), name.to_string());
+        return Self(format!("L_{name}__{}", Self::next()), name.to_string());
     }
 
     pub fn new_raw(name: &str) -> Self {
@@ -297,7 +308,9 @@ impl Expression {
 #[strum_discriminants(name(ConstantType))]
 pub enum Constant {
     Int(i32),
+    UInt(u32),
     Long(i64),
+    ULong(u64),
 }
 
 impl Constant {
@@ -305,6 +318,8 @@ impl Constant {
         match self {
             Constant::Int(i) => *i as i64,
             Constant::Long(l) => *l,
+            Constant::UInt(u) => *u as i64,
+            Constant::ULong(ul) => *ul as i64,
         }
     }
 
@@ -312,6 +327,8 @@ impl Constant {
         match self {
             Constant::Int(_) => 4,
             Constant::Long(_) => 8,
+            Constant::UInt(_) => 4,
+            Constant::ULong(_) => 8,
         }
     }
 
@@ -319,6 +336,8 @@ impl Constant {
         match self {
             Constant::Int(i) => *i == 0,
             Constant::Long(l) => *l == 0,
+            Constant::UInt(u) => *u == 0,
+            Constant::ULong(ul) => *ul == 0,
         }
     }
 
@@ -326,6 +345,8 @@ impl Constant {
         match ty {
             ConstantType::Int => Constant::Int(i),
             ConstantType::Long => Constant::Long(i as i64),
+            ConstantType::UInt => Constant::UInt(i as u32),
+            ConstantType::ULong => Constant::ULong(i as u64),
         }
     }
 
@@ -344,8 +365,25 @@ impl Constant {
     pub fn cast(self, const_ty: ConstantType) -> Constant {
         match (self, const_ty) {
             (Constant::Int(i), ConstantType::Long) => Constant::Long(i as i64),
+            (Constant::Int(i), ConstantType::UInt) => Constant::UInt(i as u32),
+            (Constant::Int(i), ConstantType::ULong) => Constant::ULong(i as u64),
+
             (Constant::Long(l), ConstantType::Int) => Constant::Int(l as i32),
-            (Constant::Int(_), ConstantType::Int) | (Constant::Long(_), ConstantType::Long) => self,
+            (Constant::Long(l), ConstantType::UInt) => Constant::UInt(l as u32),
+            (Constant::Long(l), ConstantType::ULong) => Constant::ULong(l as u64),
+
+            (Constant::UInt(u), ConstantType::Int) => Constant::Int(u as i32),
+            (Constant::UInt(u), ConstantType::Long) => Constant::Long(u as i64),
+            (Constant::UInt(u), ConstantType::ULong) => Constant::ULong(u as u64),
+
+            (Constant::ULong(ul), ConstantType::Int) => Constant::Int(ul as i32),
+            (Constant::ULong(ul), ConstantType::Long) => Constant::Long(ul as i64),
+            (Constant::ULong(ul), ConstantType::UInt) => Constant::UInt(ul as u32),
+
+            (Constant::Int(i), ConstantType::Int) => Constant::Int(i),
+            (Constant::Long(l), ConstantType::Long) => Constant::Long(l),
+            (Constant::UInt(u), ConstantType::UInt) => Constant::UInt(u),
+            (Constant::ULong(ul), ConstantType::ULong) => Constant::ULong(ul),
         }
     }
 
@@ -353,6 +391,8 @@ impl Constant {
         match self {
             Constant::Int(_) => Type::Int,
             Constant::Long(_) => Type::Long,
+            Constant::UInt(_) => Type::UInt,
+            Constant::ULong(_) => Type::ULong,
         }
     }
 }

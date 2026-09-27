@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use strum::EnumIs;
 
 use crate::{analysis::StaticInit, parser::Identifier};
@@ -21,40 +19,6 @@ impl AssemblyType {
 
     pub fn alignment(self) -> i32 {
         self.size_bytes() as i32
-    }
-}
-
-pub type AsmSymbols = HashMap<Identifier, AsmSymbol>;
-sge_global::global!(AsmSymbols, asm_symbols);
-pub fn set_asm_symbol_table(symbols: AsmSymbols) {
-    set_asm_symbols(symbols);
-}
-
-pub enum AsmSymbol {
-    Object { ty: AssemblyType, is_static: bool },
-    Function { defined: bool },
-}
-
-impl AsmSymbol {
-    pub fn is_static(&self) -> bool {
-        match self {
-            Self::Object { is_static, .. } => *is_static,
-            Self::Function { .. } => false,
-        }
-    }
-
-    pub fn ty(&self) -> Option<AssemblyType> {
-        match self {
-            Self::Object { ty, .. } => Some(*ty),
-            Self::Function { .. } => None,
-        }
-    }
-
-    pub fn defined(&self) -> bool {
-        match self {
-            Self::Object { .. } => true,
-            Self::Function { defined } => *defined,
-        }
     }
 }
 
@@ -86,7 +50,13 @@ pub enum Instruction {
         src: Operand,
         dst: Operand,
     },
+    /// sign extend
     Movsx {
+        src: Operand,
+        dst: Operand,
+    },
+    /// zero extend
+    Movzx {
         src: Operand,
         dst: Operand,
     },
@@ -101,8 +71,10 @@ pub enum Instruction {
         src: Operand,
         dst: Operand,
     },
+    ZeroOut(AssemblyType, Operand),
     Cmp(AssemblyType, Operand, Operand),
     Idiv(AssemblyType, Operand),
+    Div(AssemblyType, Operand),
     Cdq(AssemblyType),
     Jump(Identifier),
     JumpCC(CondCode, Identifier),
@@ -136,12 +108,16 @@ impl Instruction {
 
 #[derive(Debug, Clone, Copy)]
 pub enum CondCode {
-    Eq,
-    Ne,
-    Gt,
-    Ge,
-    Lt,
-    Le,
+    Eq, // set when equal
+    Ne, // set when not equal
+    Gt, // set when signed & a > b
+    Ge, // set when signed & a >= b
+    Lt, // set when signed & a < b
+    Le, // set when signed & a <= b
+    A,  // set when unsigned & a > b
+    Ae, // set when unsigned & a >= b
+    B,  // set when unsigned & a < b
+    Be, // set when unsigned & a <= b
 }
 
 impl CondCode {
@@ -153,6 +129,10 @@ impl CondCode {
             Self::Gt => "g",
             Self::Le => "le",
             Self::Ge => "ge",
+            Self::A => "a",
+            Self::Ae => "ae",
+            Self::B => "b",
+            Self::Be => "be",
         }
     }
 }
@@ -253,9 +233,6 @@ impl BinaryOperator {
         matches!(self, Self::LeftShift | Self::RightShift)
     }
 
-    /// Returns `true` if the codegen binary operator is [`Mult`].
-    ///
-    /// [`Mult`]: BinaryOperator::Mult
     #[must_use]
     pub fn is_mult(&self) -> bool {
         matches!(self, Self::Mul)
@@ -276,6 +253,10 @@ impl Operand {
     #[must_use]
     pub fn is_memory(&self) -> bool {
         matches!(self, Self::Stack(_) | Self::Data(_))
+    }
+
+    pub fn is_register(&self) -> bool {
+        matches!(self, Self::Reg(_))
     }
 
     pub fn is_constant(&self) -> bool {

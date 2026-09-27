@@ -19,31 +19,41 @@ pub enum ConstExpr {
 }
 
 impl ConstExpr {
-    pub fn eval(self) -> Constant {
+    pub fn eval(self) -> Result<Constant, &'static str> {
         match self {
-            Self::Constant(c) => c,
+            Self::Constant(c) => Ok(c),
             Self::Unary { operator, expr } => {
                 let c = expr.eval();
 
-                match c {
-                    Constant::Int(n) => Constant::Int(match operator {
+                match c? {
+                    Constant::Int(n) => Ok(Constant::Int(match operator {
                         UnaryOperator::BitwiseNot => !n,
                         UnaryOperator::Not => !(n != 0) as i32,
                         UnaryOperator::Negate => -n,
-                    }),
-                    Constant::Long(n) => match operator {
+                    })),
+                    Constant::Long(n) => Ok(match operator {
                         UnaryOperator::BitwiseNot => Constant::Long(!n),
                         UnaryOperator::Not => Constant::Int(!(n != 0) as i32),
                         UnaryOperator::Negate => Constant::Long(-n),
+                    }),
+                    Constant::UInt(n) => match operator {
+                        UnaryOperator::BitwiseNot => Ok(Constant::UInt(!n)),
+                        UnaryOperator::Not => Ok(Constant::Int(!(n != 0) as i32)),
+                        UnaryOperator::Negate => Err("cannot negate unsigned integer"),
+                    },
+                    Constant::ULong(n) => match operator {
+                        UnaryOperator::BitwiseNot => Ok(Constant::ULong(!n)),
+                        UnaryOperator::Not => Ok(Constant::Int(!(n != 0) as i32)),
+                        UnaryOperator::Negate => Err("cannot negate unsigned long"),
                     },
                 }
             }
-            Self::Cast { target_type, expr } => expr.eval().cast(target_type),
+            Self::Cast { target_type, expr } => Ok(expr.eval()?.cast(target_type)),
             Self::Binary { operator, lhs, rhs } => {
-                let lhs = lhs.eval();
-                let rhs = rhs.eval();
+                let lhs = lhs.eval()?;
+                let rhs = rhs.eval()?;
 
-                match lhs.to_common_pair(rhs) {
+                Ok(match lhs.to_common_pair(rhs) {
                     (Constant::Int(lhs), Constant::Int(rhs)) => match operator {
                         BinaryOperator::Add => Constant::Int(lhs + rhs),
                         BinaryOperator::Subtract => Constant::Int(lhs - rhs),
@@ -107,16 +117,15 @@ impl ConstExpr {
                         | BinaryOperator::RightShiftAssign => unreachable!(),
                     },
                     _ => unreachable!(),
-                }
+                })
             }
             Self::Conditional(cond, then, else_) => {
-                let cond = cond.eval();
+                let cond = cond.eval()?;
 
-                match cond {
-                    Constant::Int(0) => else_.eval(),
-                    Constant::Int(_) => then.eval(),
-                    Constant::Long(0) => else_.eval(),
-                    Constant::Long(_) => then.eval(),
+                if cond.is_zero() {
+                    else_.eval()
+                } else {
+                    then.eval()
                 }
             }
         }
@@ -124,12 +133,12 @@ impl ConstExpr {
 }
 
 impl Expression {
-    pub fn eval(&self) -> Option<Constant> {
-        self.to_constant().map(|c| c.eval())
+    pub fn eval(&self) -> Result<Constant, &'static str> {
+        self.to_constant()?.eval()
     }
 
-    pub fn to_constant(&self) -> Option<ConstExpr> {
-        match &self.kind {
+    pub fn to_constant(&self) -> Result<ConstExpr, &'static str> {
+        let res = match &self.kind {
             ExprKind::Var(_)
             | ExprKind::CompoundAssign { .. }
             | ExprKind::Assignment(_, _)
@@ -142,7 +151,7 @@ impl Expression {
                 let ty = match target_type {
                     Type::Int => ConstantType::Int,
                     Type::Long => ConstantType::Long,
-                    _ => return None,
+                    _ => return Err("non-constant expression"),
                 };
                 Some(ConstExpr::Cast {
                     target_type: ty,
@@ -158,7 +167,7 @@ impl Expression {
             }
             ExprKind::Binary { operator, lhs, rhs } => {
                 if operator.is_assign() || operator.is_compound_assign() {
-                    return None;
+                    return Err("non-constant expression");
                 }
 
                 let lhs = lhs.to_constant()?;
@@ -179,6 +188,8 @@ impl Expression {
                     Box::new(else_),
                 ))
             }
-        }
+        };
+
+        res.ok_or("non-constant expression")
     }
 }

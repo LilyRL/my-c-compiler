@@ -1,6 +1,5 @@
 use crate::ir;
 use crate::lexer::Token;
-use crate::parser::{Constant, ConstantType};
 
 pub const CONDITIONAL_PRECEDENCE: u32 = 10;
 
@@ -18,12 +17,10 @@ impl IncDec {
         }
     }
 
-    pub fn n(self, ty: ConstantType) -> Constant {
-        match (self, ty) {
-            (Self::Increment, ConstantType::Int) => Constant::Int(1),
-            (Self::Increment, ConstantType::Long) => Constant::Long(1),
-            (Self::Decrement, ConstantType::Int) => Constant::Int(-1),
-            (Self::Decrement, ConstantType::Long) => Constant::Long(-1),
+    pub fn lowered_operator(self) -> BinaryOperator {
+        match self {
+            Self::Increment => BinaryOperator::Add,
+            Self::Decrement => BinaryOperator::Subtract,
         }
     }
 }

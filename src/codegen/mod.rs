@@ -4,27 +4,31 @@ use std::collections::BTreeMap;
 
 pub use data::*;
 
-use crate::utils::{align_to, can_fit_in_i32, round_up_16};
+use crate::{
+    analysis::Symbols,
+    utils::{align_to, can_fit_in_i32, round_up_16},
+};
 
 pub const R10: Operand = Operand::Reg(Register::R10);
 pub const R11: Operand = Operand::Reg(Register::R11);
+pub const AX: Operand = Operand::Reg(Register::Ax);
+pub const DX: Operand = Operand::Reg(Register::Dx);
 
-pub fn transform(program: &mut Program) {
+pub fn transform(program: &mut Program, symbols: &Symbols) {
     for toplevel in &mut program.0 {
         if let TopLevel::F(function) = toplevel {
-            let bytes_required = replace_pseudoregisters(function);
+            let bytes_required = replace_pseudoregisters(function, symbols);
             allocate_stack_space(function, bytes_required);
             rewrite_invalid_double_memory_instructions(function);
             rewrite_invalid_imul_memory_dst(function);
-            rewrite_constant_idiv_operands(function);
+            rewrite_invalid_constant_operands(function);
             rewrite_large_imm_values(function);
             truncate_movl_imm_value(function);
         }
     }
 }
 
-/// returns the number of bytes to allocate for this function
-pub fn replace_pseudoregisters(function: &mut FunctionDefinition) -> u32 {
+pub fn replace_pseudoregisters(function: &mut FunctionDefinition, symbols: &Symbols) -> u32 {
     let mut bytes_allocated = 0;
     let mut map: BTreeMap<String, i32> = BTreeMap::new();
 
@@ -32,12 +36,16 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition) -> u32 {
         if let Operand::Pseudo(ident) = operand {
             if let Some(offset) = map.get(&ident.0) {
                 *operand = Operand::Stack(*offset);
-            } else if let Some(data) = get_asm_symbols().get(&ident)
-                && data.is_static()
+            } else if let Some(data) = symbols.get(ident)
+                && data.attributes.is_static()
             {
                 *operand = Operand::Data(ident.clone());
             } else {
-                let ty = get_asm_symbols().get(&ident).unwrap().ty().unwrap();
+                let ty = symbols
+                    .get(ident)
+                    .expect("every pseudo-register must have a symbol")
+                    .asm_type()
+                    .expect("function names are never used as operands");
                 let size = ty.size_bytes();
                 let alignment = ty.alignment();
                 bytes_allocated = align_to(bytes_allocated, alignment);
@@ -50,33 +58,21 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition) -> u32 {
 
     for instruction in function.instructions.iter_mut() {
         match instruction {
-            Instruction::Mov { src, dst, .. } => {
+            Instruction::Mov { src, dst, .. }
+            | Instruction::Movsx { src, dst }
+            | Instruction::Movzx { src, dst }
+            | Instruction::Binary { src, dst, .. }
+            | Instruction::Cmp(_, src, dst) => {
                 process_operand(src);
                 process_operand(dst);
             }
-            Instruction::Unary { operand, .. } => {
+            Instruction::SetCC(_, operand)
+            | Instruction::Unary { operand, .. }
+            | Instruction::Idiv(_, operand)
+            | Instruction::Div(_, operand)
+            | Instruction::ZeroOut(_, operand)
+            | Instruction::Push(operand) => {
                 process_operand(operand);
-            }
-            Instruction::Binary { src, dst, .. } => {
-                process_operand(src);
-                process_operand(dst);
-            }
-            Instruction::Idiv(_, operand) => {
-                process_operand(operand);
-            }
-            Instruction::Cmp(_, a, b) => {
-                process_operand(a);
-                process_operand(b);
-            }
-            Instruction::SetCC(_, operand) => {
-                process_operand(operand);
-            }
-            Instruction::Push(operand) => {
-                process_operand(operand);
-            }
-            Instruction::Movsx { src, dst } => {
-                process_operand(src);
-                process_operand(dst);
             }
             Instruction::Jump(_)
             | Instruction::JumpCC(_, _)
@@ -361,9 +357,10 @@ pub fn rewrite_invalid_imul_memory_dst(function: &mut FunctionDefinition) {
     }
 }
 
-pub fn rewrite_constant_idiv_operands(function: &mut FunctionDefinition) {
+pub fn rewrite_invalid_constant_operands(function: &mut FunctionDefinition) {
     let mut i = 0;
     while i < function.instructions.len() {
+        // TODO: reduce duplication here if you please
         match function.instructions[i].clone() {
             Instruction::Idiv(ty, operand) => {
                 if let Operand::Imm(_) = operand {
@@ -376,6 +373,47 @@ pub fn rewrite_constant_idiv_operands(function: &mut FunctionDefinition) {
                     function
                         .instructions
                         .insert(i + 1, Instruction::Idiv(ty, R10));
+
+                    i += 1;
+                }
+            }
+            Instruction::Div(ty, operand) => {
+                if let Operand::Imm(_) = operand {
+                    function.instructions[i] = Instruction::Mov {
+                        ty,
+                        src: operand,
+                        dst: R10,
+                    };
+
+                    function
+                        .instructions
+                        .insert(i + 1, Instruction::Div(ty, R10));
+
+                    i += 1;
+                }
+            }
+            Instruction::Movzx { src, dst } => {
+                if dst.is_register() {
+                    function.instructions[i] = Instruction::Mov {
+                        ty: AssemblyType::Longword,
+                        src,
+                        dst,
+                    };
+                } else {
+                    function.instructions[i] = Instruction::Mov {
+                        ty: AssemblyType::Longword,
+                        src,
+                        dst: R11,
+                    };
+
+                    function.instructions.insert(
+                        i + 1,
+                        Instruction::Mov {
+                            ty: AssemblyType::Quadword,
+                            src: R11,
+                            dst,
+                        },
+                    );
 
                     i += 1;
                 }

@@ -12,10 +12,6 @@ use crate::{
 
 type IdentifierMap = HashMap<Identifier, ScopedIdentifier>;
 
-sge_global::global!(IdentifierMap, identifiers);
-
-type Type = Identifier;
-
 #[derive(EnumIs, Clone, Copy)]
 pub enum Scope {
     Global,
@@ -24,7 +20,7 @@ pub enum Scope {
 
 #[derive(Clone, Debug)]
 pub struct ScopedIdentifier {
-    pub resolved_name: Type,
+    pub resolved_name: Identifier,
     pub from_this_scope: bool,
     pub external_linkage: bool,
     pub defined: bool,
@@ -46,8 +42,6 @@ pub fn resolve_all_identifiers(program: &mut Program, diagnostics: &mut Diagnost
     for declaration in &mut program.0 {
         resolve_declaration(declaration, &mut identifier_map, diagnostics, Scope::Global);
     }
-
-    set_identifiers(identifier_map);
 }
 
 fn resolve_block_item(
