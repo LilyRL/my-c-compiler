@@ -24,6 +24,7 @@ pub struct ScopedIdentifier {
     pub from_this_scope: bool,
     pub external_linkage: bool,
     pub defined: bool,
+    pub declared_at: Span,
 }
 
 fn create_inner_scope(outer_map: &IdentifierMap) -> IdentifierMap {
@@ -156,10 +157,12 @@ fn resolve_function_declaration(
         defined = defined || prev_entry.defined;
 
         if prev_entry.from_this_scope && !prev_entry.external_linkage {
-            diagnostics.analysis_error(
-                name_span.clone(),
-                format!("redeclaration of function '{}'", name.0),
-            );
+            diagnostics
+                .analysis_error(
+                    name_span.clone(),
+                    format!("redeclaration of function '{}'", name.0),
+                )
+                .and_label(prev_entry.declared_at.clone(), "previous declaration here");
         }
     }
 
@@ -170,6 +173,7 @@ fn resolve_function_declaration(
             from_this_scope: true,
             external_linkage: true,
             defined,
+            declared_at: name_span.clone(),
         },
     );
 
@@ -197,10 +201,12 @@ fn resolve_var_like_identifier(
     if let Some(var) = identifier_map.get(name)
         && var.from_this_scope
     {
-        diagnostics.analysis_error(
-            span.clone(),
-            format!("redeclaration of variable '{}'", name.0),
-        );
+        diagnostics
+            .analysis_error(
+                span.clone(),
+                format!("redeclaration of variable '{}'", name.0),
+            )
+            .and_label(var.declared_at.clone(), "previous declaration here");
     }
 
     let unique_name = Identifier::new(&name.0);
@@ -211,6 +217,7 @@ fn resolve_var_like_identifier(
             from_this_scope: true,
             external_linkage: false,
             defined: true,
+            declared_at: span.clone(),
         },
     );
 
@@ -243,6 +250,7 @@ fn resolve_variable_declaration(
                 from_this_scope: true,
                 external_linkage: true,
                 defined: true,
+                declared_at: decl.span.clone(),
             },
         );
     } else if scope.is_local() {
@@ -252,13 +260,15 @@ fn resolve_variable_declaration(
             let valid_previous_entry =
                 prev_entry.external_linkage && decl.storage_class.is_extern();
             if !valid_previous_entry {
-                diagnostics.analysis_error(
-                    decl.span.clone(),
-                    format!(
-                        "conflicting declarations for local variable '{}'",
-                        decl.name.0
-                    ),
-                );
+                diagnostics
+                    .analysis_error(
+                        decl.span.clone(),
+                        format!(
+                            "conflicting declarations for local variable '{}'",
+                            decl.name.0
+                        ),
+                    )
+                    .and_label(prev_entry.declared_at.clone(), "previous declaration here");
             }
         }
 
@@ -270,6 +280,7 @@ fn resolve_variable_declaration(
                     from_this_scope: true,
                     external_linkage: true,
                     defined: true,
+                    declared_at: decl.span.clone(),
                 },
             );
         } else {
@@ -281,6 +292,7 @@ fn resolve_variable_declaration(
                     from_this_scope: true,
                     external_linkage: false,
                     defined: true,
+                    declared_at: decl.span.clone(),
                 },
             );
             decl.name = new_name;

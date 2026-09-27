@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fmt::Display;
 
 use crate::analysis::Type;
@@ -376,7 +376,7 @@ impl Parser {
                         value,
                         label: Identifier::new("switch"),
                         body,
-                        case_set: HashSet::new(),
+                        case_set: HashMap::new(),
                         cases: Vec::new(),
                         default_case: None,
                     }),

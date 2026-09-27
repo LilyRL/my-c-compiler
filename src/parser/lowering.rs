@@ -36,7 +36,7 @@ impl Program {
                         Type::Long => StaticInit::Long(0),
                         Type::UInt => StaticInit::UInt(0),
                         Type::ULong => StaticInit::ULong(0),
-                        _ => unreachable!(),
+                        Type::Function(_) => unreachable!(),
                     },
                     InitialValue::None => return None,
                 };
@@ -230,13 +230,7 @@ impl Statement {
                 let result = value.lower(symbols, instructions);
                 let is_equal_name = Identifier::new("switch_case_is_equal");
                 let is_equal = Value::Var(is_equal_name.clone());
-                symbols.insert(
-                    is_equal_name,
-                    Symbol {
-                        attributes: IdentifierAttributes::Local,
-                        ty: Type::Int,
-                    },
-                );
+                symbols.insert(is_equal_name, Symbol::temporary(Type::Int));
                 let break_label = label._break();
 
                 for (label, constant) in cases {
@@ -323,13 +317,7 @@ impl Expression {
             ExprKind::Unary { operator, expr } => {
                 let dst_name = Identifier::new("tmp");
                 let dst = Value::Var(dst_name.clone());
-                symbols.insert(
-                    dst_name,
-                    Symbol {
-                        attributes: IdentifierAttributes::Local,
-                        ty: expr.ty.clone(),
-                    },
-                );
+                symbols.insert(dst_name, Symbol::temporary(expr.ty.clone()));
 
                 let src = expr.lower(symbols, instructions);
 
@@ -343,13 +331,7 @@ impl Expression {
             ExprKind::Binary { operator, lhs, rhs } if operator.can_be_lowered() => {
                 let dst_name = Identifier::new(operator.name());
                 let dst = Value::Var(dst_name.clone());
-                symbols.insert(
-                    dst_name,
-                    Symbol {
-                        attributes: IdentifierAttributes::Local,
-                        ty: lhs.ty.clone(),
-                    },
-                );
+                symbols.insert(dst_name, Symbol::temporary(lhs.ty.clone()));
                 let lhs = lhs.lower(symbols, instructions);
                 let rhs = rhs.lower(symbols, instructions);
 
@@ -365,13 +347,7 @@ impl Expression {
                 BinaryOperator::And => {
                     let dst_name = Identifier::new("and_result");
                     let dst = Value::Var(dst_name.clone());
-                    symbols.insert(
-                        dst_name,
-                        Symbol {
-                            attributes: IdentifierAttributes::Local,
-                            ty: Type::Int,
-                        },
-                    );
+                    symbols.insert(dst_name, Symbol::temporary(Type::Int));
                     let false_label = Identifier::new("and_false");
                     let end_label = Identifier::new("and_end");
 
@@ -404,13 +380,7 @@ impl Expression {
                 BinaryOperator::Or => {
                     let dst_name = Identifier::new("or_result");
                     let dst = Value::Var(dst_name.clone());
-                    symbols.insert(
-                        dst_name,
-                        Symbol {
-                            attributes: IdentifierAttributes::Local,
-                            ty: Type::Int,
-                        },
-                    );
+                    symbols.insert(dst_name, Symbol::temporary(Type::Int));
                     let true_label = Identifier::new("or_true");
                     let end_label = Identifier::new("or_end");
 
@@ -467,13 +437,7 @@ impl Expression {
 
                 let old_value_name = Identifier::new("postfix_old_value");
                 let old_value = Value::Var(old_value_name.clone());
-                symbols.insert(
-                    old_value_name,
-                    Symbol {
-                        attributes: IdentifierAttributes::Local,
-                        ty: expr.ty.clone(),
-                    },
-                );
+                symbols.insert(old_value_name, Symbol::temporary(expr.ty.clone()));
                 let expr = expr.lower(symbols, instructions);
 
                 instructions.push(Instruction::Copy {
@@ -496,13 +460,7 @@ impl Expression {
                 let end_label = Identifier::new("conditional_end");
                 let result_name = Identifier::new("conditional_result");
                 let result = Value::Var(result_name.clone());
-                symbols.insert(
-                    result_name,
-                    Symbol {
-                        attributes: IdentifierAttributes::Local,
-                        ty: if_true.ty.clone(),
-                    },
-                );
+                symbols.insert(result_name, Symbol::temporary(if_true.ty.clone()));
 
                 instructions.push(Instruction::JumpIfZero {
                     condition: cond,
@@ -540,13 +498,7 @@ impl Expression {
                     _ => unreachable!("call target must have function type"),
                 };
 
-                symbols.insert(
-                    result_name,
-                    Symbol {
-                        attributes: IdentifierAttributes::Local,
-                        ty: return_type,
-                    },
-                );
+                symbols.insert(result_name, Symbol::temporary(return_type));
 
                 instructions.push(Instruction::FunctionCall {
                     name,
@@ -565,13 +517,7 @@ impl Expression {
                 }
 
                 let dst_name = Identifier::new("cast_tmp");
-                symbols.insert(
-                    dst_name.clone(),
-                    Symbol {
-                        attributes: IdentifierAttributes::Local,
-                        ty: target_type.clone(),
-                    },
-                );
+                symbols.insert(dst_name.clone(), Symbol::temporary(target_type.clone()));
                 let dst = Value::Var(dst_name);
 
                 let src_size = src_type.size_bytes();

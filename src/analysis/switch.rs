@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use crate::{
-    diagnostics::Diagnostics,
+    diagnostics::{Diagnostics, Span},
     parser::{
         BlockItem, Constant, ConstantType, Identifier, Program, Statement, StmtKind, SwitchCase,
     },
@@ -11,7 +11,7 @@ use crate::{
 struct SwitchCaseData<'a> {
     value_ty: ConstantType,
     cases: &'a mut Vec<SwitchCase>,
-    case_set: &'a mut HashSet<Constant>,
+    case_set: &'a mut HashMap<Constant, Span>,
     default_case: &'a mut Option<Identifier>,
 }
 
@@ -33,7 +33,7 @@ fn find_and_collect_switch_cases(stmt: &mut Statement, diagnostics: &mut Diagnos
             diagnostics.analysis_error(
                 header_span.clone(),
                 "'case'/'default' label outside of a switch",
-            )
+            );
         }
         StmtKind::If { then, else_, .. } => {
             find_and_collect_switch_cases(then, diagnostics);
@@ -109,14 +109,16 @@ fn collect_switch_cases(
         } => {
             let casted_value = value.cast(data.value_ty);
 
-            if data.case_set.contains(&casted_value) {
-                diagnostics.analysis_error(
-                    header_span.clone(),
-                    format!("duplicate case value {}", value),
-                );
+            if let Some(first) = data.case_set.get(&casted_value) {
+                diagnostics
+                    .analysis_error(
+                        header_span.clone(),
+                        format!("duplicate case value {}", value),
+                    )
+                    .and_label(first.clone(), "previous case label here");
             }
 
-            data.case_set.insert(casted_value);
+            data.case_set.insert(casted_value, header_span.clone());
             data.cases.push((label.clone(), casted_value));
             collect_switch_cases(stmt, data, diagnostics);
         }

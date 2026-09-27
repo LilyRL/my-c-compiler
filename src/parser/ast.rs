@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fmt::Display,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -7,7 +7,10 @@ use std::{
 use strum::{EnumDiscriminants, EnumIs, IntoDiscriminant};
 
 use super::operators::{BinaryOperator, IncDec, UnaryOperator};
-use crate::{analysis::Type, diagnostics::Span};
+use crate::{
+    analysis::{StaticInit, Type},
+    diagnostics::Span,
+};
 
 #[derive(Debug)]
 pub struct Program(pub Vec<Declaration>);
@@ -52,14 +55,6 @@ pub enum Specifier {
 }
 
 impl Specifier {
-    pub fn ty(&self) -> Type {
-        match self {
-            Specifier::Int => Type::Int,
-            Specifier::Long => Type::Long,
-            _ => panic!(),
-        }
-    }
-
     pub fn storage_class(&self) -> StorageClass {
         match self {
             Specifier::Static => StorageClass::Static,
@@ -230,7 +225,7 @@ pub struct Switch {
     pub body: Box<Statement>,
     pub label: Identifier,
 
-    pub case_set: HashSet<Constant>,
+    pub case_set: HashMap<Constant, Span>,
     pub cases: Vec<SwitchCase>,
     pub default_case: Option<Identifier>,
 }
@@ -314,7 +309,7 @@ pub enum Constant {
 }
 
 impl Constant {
-    pub(crate) fn from_magnitude(magnitude: u128, ty: ConstantType) -> Self {
+    pub fn from_magnitude(magnitude: u128, ty: ConstantType) -> Self {
         match ty {
             ConstantType::Int => Constant::Int(magnitude as i32),
             ConstantType::UInt => Constant::UInt(magnitude as u32),
@@ -329,15 +324,6 @@ impl Constant {
             Constant::Long(l) => *l,
             Constant::UInt(u) => *u as i64,
             Constant::ULong(ul) => *ul as i64,
-        }
-    }
-
-    pub fn size_bytes(&self) -> usize {
-        match self {
-            Constant::Int(_) => 4,
-            Constant::Long(_) => 8,
-            Constant::UInt(_) => 4,
-            Constant::ULong(_) => 8,
         }
     }
 
@@ -371,28 +357,32 @@ impl Constant {
         self.cast(ConstantType::Long)
     }
 
+    fn bits(self) -> u128 {
+        match self {
+            Constant::Int(i) => i as i128 as u128,
+            Constant::UInt(u) => u as u128,
+            Constant::Long(l) => l as i128 as u128,
+            Constant::ULong(ul) => ul as u128,
+        }
+    }
+
     pub fn cast(self, const_ty: ConstantType) -> Constant {
-        match (self, const_ty) {
-            (Constant::Int(i), ConstantType::Long) => Constant::Long(i as i64),
-            (Constant::Int(i), ConstantType::UInt) => Constant::UInt(i as u32),
-            (Constant::Int(i), ConstantType::ULong) => Constant::ULong(i as u64),
+        let bits = self.bits();
 
-            (Constant::Long(l), ConstantType::Int) => Constant::Int(l as i32),
-            (Constant::Long(l), ConstantType::UInt) => Constant::UInt(l as u32),
-            (Constant::Long(l), ConstantType::ULong) => Constant::ULong(l as u64),
+        match const_ty {
+            ConstantType::Int => Constant::Int(bits as i32),
+            ConstantType::UInt => Constant::UInt(bits as u32),
+            ConstantType::Long => Constant::Long(bits as i64),
+            ConstantType::ULong => Constant::ULong(bits as u64),
+        }
+    }
 
-            (Constant::UInt(u), ConstantType::Int) => Constant::Int(u as i32),
-            (Constant::UInt(u), ConstantType::Long) => Constant::Long(u as i64),
-            (Constant::UInt(u), ConstantType::ULong) => Constant::ULong(u as u64),
-
-            (Constant::ULong(ul), ConstantType::Int) => Constant::Int(ul as i32),
-            (Constant::ULong(ul), ConstantType::Long) => Constant::Long(ul as i64),
-            (Constant::ULong(ul), ConstantType::UInt) => Constant::UInt(ul as u32),
-
-            (Constant::Int(i), ConstantType::Int) => Constant::Int(i),
-            (Constant::Long(l), ConstantType::Long) => Constant::Long(l),
-            (Constant::UInt(u), ConstantType::UInt) => Constant::UInt(u),
-            (Constant::ULong(ul), ConstantType::ULong) => Constant::ULong(ul),
+    pub fn to_static_init(self) -> StaticInit {
+        match self {
+            Constant::Int(i) => StaticInit::Int(i),
+            Constant::UInt(u) => StaticInit::UInt(u),
+            Constant::Long(l) => StaticInit::Long(l),
+            Constant::ULong(ul) => StaticInit::ULong(ul),
         }
     }
 

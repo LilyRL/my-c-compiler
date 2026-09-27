@@ -25,12 +25,15 @@ fn loop_labeling(
         StmtKind::Break(i) => match closest_breakable {
             Some(loop_identifier) => *i = loop_identifier.clone(),
             None => {
-                diagnostics.analysis_error(stmt.span.clone(), "'break' outside of a loop or switch")
+                diagnostics
+                    .analysis_error(stmt.span.clone(), "'break' outside of a loop or switch");
             }
         },
         StmtKind::Continue(i) => match closest_continuable {
             Some(loop_identifier) => *i = loop_identifier.clone(),
-            None => diagnostics.analysis_error(stmt.span.clone(), "'continue' outside of a loop"),
+            None => {
+                diagnostics.analysis_error(stmt.span.clone(), "'continue' outside of a loop");
+            }
         },
         StmtKind::If { then, else_, .. } => {
             loop_labeling(then, closest_breakable, closest_continuable, diagnostics);

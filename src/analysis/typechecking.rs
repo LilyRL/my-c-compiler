@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Display};
 
-use strum::{EnumDiscriminants, EnumIs, EnumTryAs};
+use strum::{EnumIs, EnumTryAs};
 
 use crate::{
     analysis::declarations::Scope,
-    diagnostics::Diagnostics,
+    diagnostics::{Diagnostics, Span},
     parser::{
         BlockItem, Constant, ConstantType, Declaration, ExprKind, Expression, ForInit,
         FunctionDeclaration, Identifier, Program, Statement, StmtKind, Switch, UnaryOperator,
@@ -52,7 +52,7 @@ impl Type {
             Type::Long => Some(ConstantType::Long),
             Type::UInt => Some(ConstantType::UInt),
             Type::ULong => Some(ConstantType::ULong),
-            _ => None,
+            Type::Function(_) => None,
         }
     }
 
@@ -60,7 +60,7 @@ impl Type {
         match self {
             Type::Int | Type::UInt => Some(crate::codegen::AssemblyType::Longword),
             Type::Long | Type::ULong => Some(crate::codegen::AssemblyType::Quadword),
-            _ => None,
+            Type::Function(_) => None,
         }
     }
 }
@@ -105,8 +105,7 @@ pub enum InitialValue {
     None,
 }
 
-#[derive(Clone, Debug, EnumDiscriminants, Copy)]
-#[strum_discriminants(name(StaticIntType))]
+#[derive(Clone, Debug, Copy)]
 pub enum StaticInit {
     Int(i32),
     UInt(u32),
@@ -133,42 +132,20 @@ impl StaticInit {
         }
     }
 
-    pub fn from_constant(constant: &Constant) -> Option<Self> {
-        match constant {
-            Constant::Int(i) => Some(StaticInit::Int(*i)),
-            Constant::Long(l) => Some(StaticInit::Long(*l)),
-            Constant::UInt(u) => Some(StaticInit::UInt(*u)),
-            Constant::ULong(ul) => Some(StaticInit::ULong(*ul)),
-        }
+    pub fn cast(self, ty: ConstantType) -> Self {
+        self.to_constant().cast(ty).to_static_init()
     }
 
-    pub fn to_constant(&self) -> Constant {
+    pub fn from_constant(constant: Constant) -> Self {
+        constant.to_static_init()
+    }
+
+    pub fn to_constant(self) -> Constant {
         match self {
-            StaticInit::Int(i) => Constant::Int(*i),
-            StaticInit::Long(l) => Constant::Long(*l),
-            StaticInit::UInt(u) => Constant::UInt(*u),
-            StaticInit::ULong(ul) => Constant::ULong(*ul),
-        }
-    }
-
-    pub fn cast(self, ty: StaticIntType) -> Self {
-        match (self, ty) {
-            (StaticInit::Int(i), StaticIntType::Int) => StaticInit::Int(i),
-            (StaticInit::Int(i), StaticIntType::Long) => StaticInit::Long(i as i64),
-            (StaticInit::Int(i), StaticIntType::UInt) => StaticInit::UInt(i as u32),
-            (StaticInit::Int(i), StaticIntType::ULong) => StaticInit::ULong(i as u64),
-            (StaticInit::Long(l), StaticIntType::Int) => StaticInit::Int(l as i32),
-            (StaticInit::Long(l), StaticIntType::Long) => StaticInit::Long(l),
-            (StaticInit::Long(l), StaticIntType::UInt) => StaticInit::UInt(l as u32),
-            (StaticInit::Long(l), StaticIntType::ULong) => StaticInit::ULong(l as u64),
-            (StaticInit::UInt(u), StaticIntType::Int) => StaticInit::Int(u as i32),
-            (StaticInit::UInt(u), StaticIntType::Long) => StaticInit::Long(u as i64),
-            (StaticInit::UInt(u), StaticIntType::UInt) => StaticInit::UInt(u),
-            (StaticInit::UInt(u), StaticIntType::ULong) => StaticInit::ULong(u as u64),
-            (StaticInit::ULong(ul), StaticIntType::Int) => StaticInit::Int(ul as i32),
-            (StaticInit::ULong(ul), StaticIntType::Long) => StaticInit::Long(ul as i64),
-            (StaticInit::ULong(ul), StaticIntType::UInt) => StaticInit::UInt(ul as u32),
-            (StaticInit::ULong(ul), StaticIntType::ULong) => StaticInit::ULong(ul),
+            StaticInit::Int(i) => Constant::Int(i),
+            StaticInit::UInt(u) => Constant::UInt(u),
+            StaticInit::Long(l) => Constant::Long(l),
+            StaticInit::ULong(ul) => Constant::ULong(ul),
         }
     }
 }
@@ -177,11 +154,20 @@ impl StaticInit {
 pub struct Symbol {
     pub attributes: IdentifierAttributes,
     pub ty: Type,
+    pub declared_at: Span,
 }
 
 impl Symbol {
     pub fn asm_type(&self) -> Option<crate::codegen::AssemblyType> {
         self.ty.to_asm_type()
+    }
+
+    pub fn temporary(ty: Type) -> Self {
+        Self {
+            attributes: IdentifierAttributes::Local,
+            ty,
+            declared_at: 0..0,
+        }
     }
 }
 
@@ -190,12 +176,6 @@ pub struct FunctionType {
     pub parameters: Vec<Type>,
     pub defined: bool,
     pub return_type: Type,
-}
-
-impl FunctionType {
-    pub fn num_parameters(&self) -> usize {
-        self.parameters.len()
-    }
 }
 
 pub type Symbols = HashMap<Identifier, Symbol>;
@@ -208,17 +188,13 @@ impl Display for Type {
             Type::UInt => write!(f, "unsigned int"),
             Type::ULong => write!(f, "unsigned long"),
             Type::Function(func) => {
-                write!(f, "int(")?;
+                write!(f, "{} (", func.return_type)?;
 
-                let mut n = func.num_parameters();
-
-                if n != 0 {
-                    write!(f, "int")?;
-                    n -= 1;
-
-                    for _ in 0..n {
-                        write!(f, ", int")?;
+                for (i, param) in func.parameters.iter().enumerate() {
+                    if i != 0 {
+                        write!(f, ", ")?;
                     }
+                    write!(f, "{param}")?;
                 }
 
                 write!(f, ")")
@@ -270,7 +246,14 @@ fn check_local_variable(
         if let Some(old_decl) = symbols.get(&decl.name) {
             if old_decl.ty != decl.ty {
                 diagnostics
-                    .analysis_error(decl.span.clone(), "redeclaration with a different type");
+                    .analysis_error(
+                        decl.span.clone(),
+                        format!(
+                            "redeclaration of '{}' with a different type: '{}' here, but '{}' previously",
+                            decl.name.1, decl.ty, old_decl.ty
+                        ),
+                    )
+                    .and_label(old_decl.declared_at.clone(), "previous declaration here");
             }
         } else {
             symbols.insert(
@@ -281,6 +264,7 @@ fn check_local_variable(
                         global: true,
                     },
                     ty: decl.ty.clone(),
+                    declared_at: decl.span.clone(),
                 },
             );
         }
@@ -298,6 +282,7 @@ fn check_local_variable(
                     global: false,
                 },
                 ty: decl.ty.clone(),
+                declared_at: decl.span.clone(),
             },
         );
     } else {
@@ -306,6 +291,7 @@ fn check_local_variable(
             Symbol {
                 attributes: IdentifierAttributes::Local,
                 ty: decl.ty.clone(),
+                declared_at: decl.span.clone(),
             },
         );
 
@@ -330,39 +316,47 @@ fn check_global_variable_declaration(
 
     if let Some(old_decl) = symbols.get(&decl.name) {
         if old_decl.ty.is_function() {
-            diagnostics.analysis_error(
-                decl.span.clone(),
-                format!(
-                    "'{}' redeclared as a variable but was previously a function",
-                    decl.name.1
-                ),
-            );
+            diagnostics
+                .analysis_error(
+                    decl.span.clone(),
+                    format!(
+                        "'{}' redeclared as a variable but was previously a function",
+                        decl.name.1
+                    ),
+                )
+                .and_label(old_decl.declared_at.clone(), "previous declaration here");
         } else if old_decl.ty != decl.ty {
-            diagnostics.analysis_error(
-                decl.span.clone(),
-                format!(
-                    "conflicting types for '{}': '{}' vs '{}'",
-                    decl.name.1, old_decl.ty, decl.ty
-                ),
-            );
+            diagnostics
+                .analysis_error(
+                    decl.span.clone(),
+                    format!(
+                        "conflicting types for '{}': '{}' here, but '{}' previously",
+                        decl.name.1, decl.ty, old_decl.ty
+                    ),
+                )
+                .and_label(old_decl.declared_at.clone(), "previous declaration here");
         }
 
         if decl.storage_class.is_extern() {
             is_global = old_decl.attributes.global();
         } else if old_decl.attributes.global() != is_global {
-            diagnostics.analysis_error(
-                decl.span.clone(),
-                format!("conflicting linkage for variable '{}'", decl.name.1),
-            );
+            diagnostics
+                .analysis_error(
+                    decl.span.clone(),
+                    format!("conflicting linkage for variable '{}'", decl.name.1),
+                )
+                .and_label(old_decl.declared_at.clone(), "previous declaration here");
         }
 
         if let Some(old_init) = old_decl.attributes.initial_value() {
             if old_init.is_constant() {
                 if initial_value.is_constant() {
-                    diagnostics.analysis_error(
-                        decl.span.clone(),
-                        format!("conflicting file-scope definitions for '{}'", decl.name.1),
-                    );
+                    diagnostics
+                        .analysis_error(
+                            decl.span.clone(),
+                            format!("conflicting file-scope definitions for '{}'", decl.name.1),
+                        )
+                        .and_label(old_decl.declared_at.clone(), "previous definition here");
                 } else {
                     initial_value = old_init;
                 }
@@ -377,11 +371,16 @@ fn check_global_variable_declaration(
         global: is_global,
     };
 
+    let declared_at = symbols
+        .get(&decl.name)
+        .map_or_else(|| decl.span.clone(), |old| old.declared_at.clone());
+
     symbols.insert(
         decl.name.clone(),
         Symbol {
             attributes,
             ty: decl.ty.clone(),
+            declared_at,
         },
     );
 }
@@ -405,43 +404,58 @@ fn check_function_declaration(
                 new.defined = old.defined || has_body;
 
                 if old.parameters != new.parameters || old.return_type != new.return_type {
-                    diagnostics.analysis_error(
-                        decl.span.clone(),
+                    let which = if old.parameters != new.parameters {
+                        String::from("different parameters")
+                    } else {
                         format!(
-                            "incompatible function declarations: '{}' vs '{}'",
-                            Type::Function(old.clone()),
-                            Type::Function(Box::new(new.clone()))
-                        ),
-                    );
+                            "return type '{}' rather than '{}'",
+                            decl.return_type, old.return_type
+                        )
+                    };
+                    diagnostics
+                        .analysis_error(
+                            decl.span.clone(),
+                            format!(
+                                "conflicting types for '{}': declaration has {}",
+                                decl.name.1, which
+                            ),
+                        )
+                        .and_label(old_decl.declared_at.clone(), "previous declaration here");
                 }
 
                 if old.defined && has_body {
-                    diagnostics.analysis_error(
-                        decl.span.clone(),
-                        format!("redefinition of function '{}'", decl.name.1),
-                    );
+                    diagnostics
+                        .analysis_error(
+                            decl.span.clone(),
+                            format!("redefinition of function '{}'", decl.name.1),
+                        )
+                        .and_label(old_decl.declared_at.clone(), "previous definition here");
                 }
 
                 if old_decl.attributes.global() && decl.storage_class.is_static() {
-                    diagnostics.analysis_error(
-                        decl.span.clone(),
-                        format!(
-                            "static declaration of '{}' follows non-static declaration",
-                            decl.name.1
-                        ),
-                    );
+                    diagnostics
+                        .analysis_error(
+                            decl.span.clone(),
+                            format!(
+                                "static declaration of '{}' follows non-static declaration",
+                                decl.name.1
+                            ),
+                        )
+                        .and_label(old_decl.declared_at.clone(), "previous declaration here");
                 }
 
                 is_global = old_decl.attributes.global();
             }
             _ => {
-                diagnostics.analysis_error(
-                    decl.span.clone(),
-                    format!(
-                        "'{}' redeclared as a function but was previously declared as a variable",
-                        decl.name.1
-                    ),
-                );
+                diagnostics
+                    .analysis_error(
+                        decl.span.clone(),
+                        format!(
+                            "'{}' redeclared as a function but was previously declared as a variable",
+                            decl.name.1
+                        ),
+                    )
+                    .and_label(old_decl.declared_at.clone(), "previous declaration here");
             }
         }
     }
@@ -451,11 +465,16 @@ fn check_function_declaration(
         global: is_global,
     };
 
+    let declared_at = symbols
+        .get(&decl.name)
+        .map_or_else(|| decl.span.clone(), |old| old.declared_at.clone());
+
     symbols.insert(
         decl.name.clone(),
         Symbol {
             attributes,
             ty: Type::Function(Box::new(new)),
+            declared_at,
         },
     );
 
@@ -466,6 +485,7 @@ fn check_function_declaration(
                 Symbol {
                     attributes: IdentifierAttributes::Local,
                     ty: param.ty.clone(),
+                    declared_at: param.span.clone(),
                 },
             );
         }
@@ -741,19 +761,15 @@ fn resolve_init(
     if let Some(expr) = &decl.init {
         match expr.eval() {
             Ok(constant) => {
-                if let Some(static_int) = StaticInit::from_constant(&constant) {
-                    let const_ty = match decl.ty {
-                        Type::Int => StaticIntType::Int,
-                        Type::Long => StaticIntType::Long,
-                        Type::UInt => StaticIntType::UInt,
-                        Type::ULong => StaticIntType::ULong,
-                        Type::Function(_) => unreachable!("local var can't have function type"),
-                    };
-                    Some(InitialValue::Constant(static_int.cast(const_ty)))
-                } else {
-                    diagnostics.analysis_error(decl.span.clone(), "initializer is not an integer");
-                    None
-                }
+                let const_ty = decl.ty.to_constant().unwrap_or_else(|| {
+                    unreachable!(
+                        "{} var can't have function type",
+                        if scope.is_local() { "local" } else { "global" }
+                    )
+                });
+                Some(InitialValue::Constant(
+                    StaticInit::from_constant(constant).cast(const_ty),
+                ))
             }
             Err(e) => {
                 diagnostics.analysis_error(decl.span.clone(), e);

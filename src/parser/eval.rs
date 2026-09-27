@@ -151,7 +151,9 @@ impl Expression {
                 let ty = match target_type {
                     Type::Int => ConstantType::Int,
                     Type::Long => ConstantType::Long,
-                    _ => return Err("non-constant expression"),
+                    Type::UInt => ConstantType::UInt,
+                    Type::ULong => ConstantType::ULong,
+                    Type::Function(_) => return Err("non-constant expression"),
                 };
                 Some(ConstExpr::Cast {
                     target_type: ty,

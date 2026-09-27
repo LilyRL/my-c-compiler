@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use crate::{
-    diagnostics::Diagnostics,
-    parser::{BlockItem, Program, StmtKind},
+    diagnostics::{Diagnostics, Span},
+    parser::{BlockItem, Identifier, Program, StmtKind},
 };
 
 pub fn rename_all_gotos(program: &mut Program) {
@@ -31,7 +31,7 @@ pub fn rename_all_gotos(program: &mut Program) {
 pub fn check_if_all_gotos_point_somewhere_valid(program: &Program, diagnostics: &mut Diagnostics) {
     for func in program.functions() {
         if let Some(body) = &func.body {
-            let mut labels = HashSet::new();
+            let mut labels: HashMap<Identifier, Span> = HashMap::new();
 
             for item in body {
                 match item {
@@ -40,13 +40,15 @@ pub fn check_if_all_gotos_point_somewhere_valid(program: &Program, diagnostics: 
                             &mut (&mut labels, &mut *diagnostics),
                             &|stmt, (labels, diagnostics)| match &stmt.kind {
                                 StmtKind::Label(i, _) => {
-                                    if labels.contains(i) {
-                                        diagnostics.analysis_error(
-                                            stmt.span.clone(),
-                                            format!("duplicate label '{}'", i.1),
-                                        );
+                                    if let Some(first) = labels.get(i) {
+                                        diagnostics
+                                            .analysis_error(
+                                                stmt.span.clone(),
+                                                format!("duplicate label '{}'", i.1),
+                                            )
+                                            .and_label(first.clone(), "previous definition here");
                                     } else {
-                                        labels.insert(i.clone());
+                                        labels.insert(i.clone(), stmt.span.clone());
                                     }
                                 }
                                 _ => (),
@@ -64,7 +66,7 @@ pub fn check_if_all_gotos_point_somewhere_valid(program: &Program, diagnostics: 
                             .kind
                         {
                             StmtKind::Goto(i) => {
-                                if !labels.contains(i) {
+                                if !labels.contains_key(i) {
                                     diagnostics.analysis_error(
                                         stmt.span.clone(),
                                         format!("undeclared goto target '{}'", i.1),
