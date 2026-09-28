@@ -183,7 +183,7 @@ pub enum Operand {
     Reg(Register),
     Pseudo(Identifier),
     Stack(i32),
-    Data(Identifier),
+    Data(String),
 }
 
 impl BinaryOperator {

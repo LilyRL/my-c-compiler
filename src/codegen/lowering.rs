@@ -36,10 +36,13 @@ impl crate::codegen::data::Program {
 
 impl FunctionDefinition {
     pub fn format(&self, symbols: &Symbols) -> String {
-        let mut name = self.name.0.to_string();
-        if target_os() == TargetOs::MacOs {
-            name = format!("_{name}");
-        }
+        let target = target_os();
+        let name = target.decorate_symbol(&self.name.0, self.global);
+
+        let type_directive = match target.is_elf() {
+            true => format!("    .type {name}, @function\n"),
+            false => String::new(),
+        };
 
         let mut lines = Vec::new();
         for instruction in &self.instructions {
@@ -47,16 +50,11 @@ impl FunctionDefinition {
         }
 
         let instructions = lines.join("\n");
-        let global_directive = if self.global {
-            &format!(".globl {name}")
-        } else {
-            ""
-        };
+        let global_directive = target.global_directive(&self.name.0, self.global);
 
         format!(
             r#"
-    .type {name}, @function
-    {global_directive}
+{type_directive}    {global_directive}
     .text
 {name}:
     pushq %rbp
@@ -68,12 +66,9 @@ impl FunctionDefinition {
 
 impl StaticVariable {
     pub fn format(&self) -> String {
-        let global_directive = if self.global {
-            &format!(".globl {}", self.name.0)
-        } else {
-            ""
-        };
-        let name = &self.name;
+        let target = target_os();
+        let global_directive = target.global_directive(&self.name.0, self.global);
+        let name = target.decorate_symbol(&self.name.0, self.global);
 
         let size_bytes = self.init.size_bytes();
         let alignment = self.alignment;
@@ -195,27 +190,19 @@ impl Instruction {
             }
             Self::Comment(c) => lines.push(format!("    # {}", c)),
             Self::Call(name) => {
-                // need to append @PLT on linux if its defined somewhere else
-                let is_defined = symbols
+                let attributes = &symbols
                     .get(name)
                     .expect("call target must have a symbol")
-                    .attributes
-                    .defined();
-                if is_defined {
-                    let s = match target_os() {
-                        TargetOs::Linux => format!("    call {}", name),
-                        TargetOs::MacOs => format!("    call _{}", name),
-                    };
+                    .attributes;
+                let (is_defined, is_global) = (attributes.defined(), attributes.global());
+                let symbol = target_os().decorate_symbol(&name.0, is_global);
 
-                    lines.push(s);
-                } else {
-                    let s = match target_os() {
-                        TargetOs::Linux => format!("    call {}@PLT", name),
-                        TargetOs::MacOs => format!("    call _{}", name),
-                    };
+                let s = match (target_os(), is_defined) {
+                    (TargetOs::Linux, false) => format!("    call {symbol}@PLT"),
+                    _ => format!("    call {symbol}"),
+                };
 
-                    lines.push(s);
-                }
+                lines.push(s);
             }
             Self::Push(op) => {
                 lines.push(format!("    pushq {}", op.format(8)));
@@ -283,7 +270,7 @@ impl Operand {
             }
             .to_string(),
             Self::Stack(offset) => format!("{}(%rbp)", offset),
-            Self::Data(name) => format!("{}(%rip)", name.0),
+            Self::Data(name) => format!("{name}(%rip)"),
             Self::Pseudo(_) => unimplemented!(),
         }
     }

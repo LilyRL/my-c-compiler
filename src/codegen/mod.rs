@@ -39,7 +39,8 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition, symbols: &Symb
             } else if let Some(data) = symbols.get(ident)
                 && data.attributes.is_static()
             {
-                *operand = Operand::Data(ident.clone());
+                let global = data.attributes.global();
+                *operand = Operand::Data(crate::os::target_os().decorate_symbol(&ident.0, global));
             } else {
                 let ty = symbols
                     .get(ident)
