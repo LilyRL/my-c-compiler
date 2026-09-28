@@ -1,6 +1,6 @@
 
 #include "lib.c"
 
-unsigned int foo(void);
+u32 foo(void);
 
-int main(void) { return 0; }
+i32 main(void) { return 0; }

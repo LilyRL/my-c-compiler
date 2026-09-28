@@ -1,4 +1,0 @@
-fix errors pointing to the wrong place after preprocessing. we dont do the
-preprocessing ourselves, so we only see the output preprocessed by GCC, this
-means that in files with comments or # directives, the errors report the wrong
-line number.

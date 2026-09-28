@@ -7,6 +7,8 @@ use crate::{
     parser::{Constant, ConstantType, Specifier},
 };
 
+mod hash;
+
 #[derive(Debug, PartialEq, Copy, Clone, EnumIs)]
 pub enum Token {
     Ident,
@@ -81,34 +83,15 @@ pub struct SpannedToken {
 }
 
 pub fn lex(source: &str) -> Result<Vec<SpannedToken>, Vec<Diagnostic>> {
-    let mut lexer = Lexer::new(source);
-    let mut tokens = vec![];
-    let mut errors = vec![];
-
-    loop {
-        match lexer.next_token() {
-            Ok(spanned) => {
-                let is_eof = spanned.token.is_end_of_input();
-                tokens.push(spanned);
-                if is_eof {
-                    break;
-                }
-            }
-            Err(diag) => errors.push(diag),
-        }
-    }
-
-    if errors.is_empty() {
-        Ok(tokens)
-    } else {
-        Err(errors)
-    }
+    Lexer::new(source).lex()
 }
 
 struct Lexer<'a> {
     source: &'a str,
     bytes: &'a [u8],
     pos: usize,
+    tokens: Vec<SpannedToken>,
+    diagnostics: Vec<Diagnostic>,
 }
 
 impl<'a> Lexer<'a> {
@@ -117,6 +100,8 @@ impl<'a> Lexer<'a> {
             source,
             bytes: source.as_bytes(),
             pos: 0,
+            tokens: vec![],
+            diagnostics: vec![],
         }
     }
 
@@ -145,7 +130,21 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn next_token(&mut self) -> Result<SpannedToken, Diagnostic> {
+    fn push(&mut self, token: SpannedToken) {
+        self.tokens.push(token);
+    }
+
+    fn lex(mut self) -> Result<Vec<SpannedToken>, Vec<Diagnostic>> {
+        while !self.next_token() {}
+
+        if self.diagnostics.is_empty() {
+            Ok(self.tokens)
+        } else {
+            Err(self.diagnostics)
+        }
+    }
+
+    fn next_token(&mut self) -> bool {
         loop {
             self.skip_whitespace();
 
@@ -160,34 +159,46 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
 
         let Some(c) = self.peek() else {
-            return Ok(SpannedToken {
+            self.push(SpannedToken {
                 token: Token::EndOfInput,
                 span: self.source.len()..self.source.len(),
             });
+
+            return true;
         };
 
         if c.is_ascii_alphabetic() || c == b'_' {
-            return Ok(self.lex_ident_or_keyword(start));
+            self.lex_ident_or_keyword(start);
+            return false;
         }
 
         if c.is_ascii_digit() {
-            return self.lex_number(start);
+            self.lex_number(start);
+            return false;
         }
 
-        self.lex_operator(start)
+        self.lex_operator(start);
+
+        false
     }
 
-    fn lex_ident_or_keyword(&mut self, start: usize) -> SpannedToken {
+    fn lex_ident_or_keyword(&mut self, start: usize) {
         while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == b'_') {
             self.pos += 1;
         }
         let span = start..self.pos;
         let text = &self.source[span.clone()];
-        let token = keyword_from_str(text).unwrap_or(Token::Ident);
-        SpannedToken { token, span }
+        let tokens = keyword_from_str(text).unwrap_or(&[Token::Ident]);
+
+        for token in tokens {
+            self.push(SpannedToken {
+                token: *token,
+                span: span.clone(),
+            });
+        }
     }
 
-    fn lex_number(&mut self, start: usize) -> Result<SpannedToken, Diagnostic> {
+    fn lex_number(&mut self, start: usize) {
         while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
             self.pos += 1;
         }
@@ -201,56 +212,66 @@ impl<'a> Lexer<'a> {
         let span = start..self.pos;
         let text = &self.source[span.clone()];
 
-        // TODO: hex and octal and binary support arent done yet. i'll wait to see if they come up in the book
-        let constant = classify_integer(
+        // TODO: hex and octal and binary support arent done yet. i'll wait to see if they come up in the book first
+        let constant = match classify_integer(
             &self.source[start..digits_end],
             &self.source[suffix_start..self.pos],
             true,
-        )
-        .map_err(|e| Diagnostic::new(Stage::Lex, span.clone(), e.message(text)))?;
+        ) {
+            Ok(constant) => constant,
+            Err(e) => {
+                self.diagnostics
+                    .push(Diagnostic::new(Stage::Lex, span.clone(), e.message(text)));
+                return;
+            }
+        };
 
-        Ok(SpannedToken {
+        self.push(SpannedToken {
             token: Token::Literal(constant),
             span,
-        })
+        });
     }
 
-    fn lex_operator(&mut self, start: usize) -> Result<SpannedToken, Diagnostic> {
+    fn lex_operator(&mut self, start: usize) {
         let three = self.peek_str(3);
         if let Some(tok) = three.and_then(three_char_op) {
             self.pos += 3;
-            return Ok(SpannedToken {
+            self.push(SpannedToken {
                 token: tok,
                 span: start..self.pos,
             });
+            return;
         }
 
         let two = self.peek_str(2);
         if let Some(tok) = two.and_then(two_char_op) {
             self.pos += 2;
-            return Ok(SpannedToken {
+            self.push(SpannedToken {
                 token: tok,
                 span: start..self.pos,
             });
+            return;
         }
 
         let c = self.bump().unwrap();
         if let Some(tok) = one_char_op(c) {
-            return Ok(SpannedToken {
+            self.push(SpannedToken {
                 token: tok,
                 span: start..self.pos,
             });
+            return;
         }
 
         let text: String = (self.source[start..self.pos])
             .chars()
             .map(|c| c.escape_debug().to_string())
             .collect();
-        Err(Diagnostic::new(
+
+        self.diagnostics.push(Diagnostic::new(
             Stage::Lex,
             start..self.pos,
             format!("unexpected character '{text}'"),
-        ))
+        ));
     }
 
     fn peek_str(&self, len: usize) -> Option<&'a str> {
@@ -263,29 +284,8 @@ impl<'a> Lexer<'a> {
     }
 }
 
-fn keyword_from_str(s: &str) -> Option<Token> {
-    Some(match s {
-        "int" => Token::Int,
-        "long" => Token::Long,
-        "void" => Token::Void,
-        "signed" => Token::Signed,
-        "unsigned" => Token::Unsigned,
-        "return" => Token::Return,
-        "if" => Token::If,
-        "else" => Token::Else,
-        "goto" => Token::Goto,
-        "do" => Token::Do,
-        "while" => Token::While,
-        "for" => Token::For,
-        "switch" => Token::Switch,
-        "case" => Token::Case,
-        "default" => Token::Default,
-        "break" => Token::Break,
-        "continue" => Token::Continue,
-        "static" => Token::Static,
-        "extern" => Token::Extern,
-        _ => return None,
-    })
+fn keyword_from_str(s: &str) -> Option<&[Token]> {
+    hash::KEYWORDS.get(s).copied()
 }
 
 fn three_char_op(s: &str) -> Option<Token> {
@@ -297,54 +297,11 @@ fn three_char_op(s: &str) -> Option<Token> {
 }
 
 fn two_char_op(s: &str) -> Option<Token> {
-    Some(match s {
-        "<<" => Token::LeftShift,
-        ">>" => Token::RightShift,
-        "&&" => Token::LogicalAnd,
-        "||" => Token::LogicalOr,
-        "==" => Token::Equal,
-        "!=" => Token::NotEqual,
-        "<=" => Token::LessEqual,
-        ">=" => Token::GreaterEqual,
-        "+=" => Token::AddAssign,
-        "-=" => Token::SubtractAssign,
-        "*=" => Token::MultiplyAssign,
-        "/=" => Token::DivideAssign,
-        "%=" => Token::RemainderAssign,
-        "&=" => Token::BitwiseAndAssign,
-        "^=" => Token::BitwiseXorAssign,
-        "|=" => Token::BitwiseOrAssign,
-        "++" => Token::Increment,
-        "--" => Token::Decrement,
-        _ => return None,
-    })
+    hash::TWO_CHAR_OPS.get(s).copied()
 }
 
 fn one_char_op(c: u8) -> Option<Token> {
-    Some(match c {
-        b'(' => Token::OpenParen,
-        b')' => Token::CloseParen,
-        b'{' => Token::OpenBrace,
-        b'}' => Token::CloseBrace,
-        b';' => Token::Semicolon,
-        b'~' => Token::Tilde,
-        b'-' => Token::Hyphen,
-        b'+' => Token::Plus,
-        b'*' => Token::Asterisk,
-        b'/' => Token::Slash,
-        b'%' => Token::Percent,
-        b'&' => Token::Ampersand,
-        b'^' => Token::Caret,
-        b'|' => Token::Pipe,
-        b'!' => Token::Not,
-        b'<' => Token::LessThan,
-        b'>' => Token::GreaterThan,
-        b'=' => Token::Assign,
-        b'?' => Token::QuestionMark,
-        b':' => Token::Colon,
-        b',' => Token::Comma,
-        _ => return None,
-    })
+    hash::ONE_CHAR_OPS.get(&c).copied()
 }
 
 impl Token {
@@ -375,13 +332,13 @@ impl Token {
 impl Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Token::Ident => "identifier",
             Token::Literal(c) => match c {
                 Constant::Int(_) => "literal_int",
                 Constant::Long(_) => "literal_long",
                 Constant::UInt(_) => "literal_unsigned_int",
                 Constant::ULong(_) => "literal_unsigned_long",
             },
+            Token::Ident => "identifier",
             Token::Int => "int",
             Token::Long => "long",
             Token::Void => "void",
