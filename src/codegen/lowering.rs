@@ -1,6 +1,9 @@
 use std::fmt::{self, Display};
 
-use crate::analysis::{StaticInit, Symbols};
+use crate::{
+    analysis::{StaticInit, Symbols},
+    os::{TargetOs, target_os},
+};
 
 use super::*;
 
@@ -22,20 +25,21 @@ impl crate::codegen::data::Program {
             .collect::<Vec<_>>()
             .join("\n\n");
 
-        #[cfg(not(target_os = "linux"))]
-        return inner;
-        #[cfg(target_os = "linux")]
-        return format!("    .section .note.GNU-stack,\"\",@progbits\n    .text\n{inner}\n");
+        match target_os() {
+            TargetOs::Linux => {
+                format!("    .section .note.GNU-stack,\"\",@progbits\n    .text\n{inner}\n")
+            }
+            TargetOs::MacOs => inner,
+        }
     }
 }
 
 impl FunctionDefinition {
     pub fn format(&self, symbols: &Symbols) -> String {
-        let name = self.name.0.to_string();
-        // TODO: this should probably be a flag instead, so you can cross compile
-        // there's some more stuff, grep for target_os
-        #[cfg(target_os = "macos")]
-        let name = format!("_{name}");
+        let mut name = self.name.0.to_string();
+        if target_os() == TargetOs::MacOs {
+            name = format!("_{name}");
+        }
 
         let mut lines = Vec::new();
         for instruction in &self.instructions {
@@ -198,15 +202,19 @@ impl Instruction {
                     .attributes
                     .defined();
                 if is_defined {
-                    #[cfg(target_os = "macos")]
-                    lines.push(format!("    call _{}", name));
-                    #[cfg(target_os = "linux")]
-                    lines.push(format!("    call {}", name));
+                    let s = match target_os() {
+                        TargetOs::Linux => format!("    call _{}", name),
+                        TargetOs::MacOs => format!("    call {}", name),
+                    };
+
+                    lines.push(s);
                 } else {
-                    #[cfg(target_os = "macos")]
-                    lines.push(format!("    call _{}", name));
-                    #[cfg(target_os = "linux")]
-                    lines.push(format!("    call {}@PLT", name));
+                    let s = match target_os() {
+                        TargetOs::Linux => format!("    call {}@PLT", name),
+                        TargetOs::MacOs => format!("    call _{}", name),
+                    };
+
+                    lines.push(s);
                 }
             }
             Self::Push(op) => {

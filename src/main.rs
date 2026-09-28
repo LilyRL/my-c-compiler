@@ -18,6 +18,7 @@ mod codegen;
 mod diagnostics;
 mod ir;
 mod lexer;
+mod os;
 mod parser;
 mod sourcemap;
 mod utils;
@@ -61,6 +62,9 @@ struct Args {
 
     #[arg(short = 'c', default_value_t = false)]
     generate_object: bool,
+
+    #[arg(short = 't', long = "taget", default_value_t = String::from("host"))]
+    target_os: String,
 }
 
 #[derive(Debug)]
