@@ -63,7 +63,7 @@ struct Args {
     #[arg(short = 'c', default_value_t = false)]
     generate_object: bool,
 
-    #[arg(short = 't', long = "taget", default_value_t = String::from("host"))]
+    #[arg(short = 't', long = "target", default_value_t = String::from("host"))]
     target_os: String,
 }
 

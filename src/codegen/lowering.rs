@@ -203,8 +203,8 @@ impl Instruction {
                     .defined();
                 if is_defined {
                     let s = match target_os() {
-                        TargetOs::Linux => format!("    call _{}", name),
-                        TargetOs::MacOs => format!("    call {}", name),
+                        TargetOs::Linux => format!("    call {}", name),
+                        TargetOs::MacOs => format!("    call _{}", name),
                     };
 
                     lines.push(s);

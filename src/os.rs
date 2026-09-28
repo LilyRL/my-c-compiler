@@ -37,7 +37,7 @@ pub fn handle_target_os_arguement(arg: &str) {
             println!("supported target operating systems are: 'linux', 'macos'");
         }
         a => {
-            println!("--target-os set to {}", a);
+            println!("--target set to {}", a);
             println!("supported target operating systems are: 'linux', 'macos', 'host'");
         }
     }
