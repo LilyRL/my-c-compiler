@@ -1,3 +1,7 @@
+use std::ops::Range;
+
+pub type Span = Range<usize>;
+
 pub struct LineMap {
     entries: Vec<(usize, Option<String>, u32)>,
 }

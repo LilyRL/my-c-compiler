@@ -1,11 +1,10 @@
 use std::fmt::{self, Display};
 
-use crate::{
-    analysis::{StaticInit, Symbols},
-    os::{TargetOs, target_os},
-};
-
 use super::*;
+use crate::{
+    core::{StaticInit, Symbols},
+    target::{TargetOs, target_os},
+};
 
 impl Display for AssemblyType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -16,7 +15,7 @@ impl Display for AssemblyType {
     }
 }
 
-impl crate::codegen::data::Program {
+impl Program {
     pub fn format(&self, symbols: &Symbols) -> String {
         let inner = self
             .0

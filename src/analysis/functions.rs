@@ -1,8 +1,7 @@
 use crate::{
+    core::Constant,
     diagnostics::Diagnostics,
-    parser::{
-        BlockItem, Constant, Declaration, ExprKind, Expression, Program, Statement, StmtKind,
-    },
+    syntax::{BlockItem, Declaration, ExprKind, Expression, Program, Statement, StmtKind},
 };
 
 pub fn check_for_nested_functions(program: &Program, diagnostics: &mut Diagnostics) {

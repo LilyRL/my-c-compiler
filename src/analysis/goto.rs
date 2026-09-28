@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    diagnostics::{Diagnostics, Span},
-    parser::{BlockItem, Identifier, Program, StmtKind},
+    core::{Identifier, Span},
+    diagnostics::Diagnostics,
+    syntax::{BlockItem, Program, StmtKind},
 };
 
 pub fn rename_all_gotos(program: &mut Program) {

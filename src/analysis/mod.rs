@@ -2,24 +2,24 @@ use crate::{
     analysis::{
         functions::{add_return_zero, check_for_nested_functions},
         goto::{check_if_all_gotos_point_somewhere_valid, rename_all_gotos},
-        typechecking::check_all_types,
+        typecheck::check_all_types,
     },
+    core::{Symbols, Type},
     diagnostics::Diagnostics,
-    parser::{BlockItem, ExprKind, Expression, Program, VariableDeclaration},
+    syntax::{BlockItem, ExprKind, Expression, Program, VariableDeclaration},
 };
 
 use declarations::resolve_all_identifiers;
 use loops::label_all_loops;
 use switch::collect_all_switch_cases;
 
-pub use typechecking::{IdentifierAttributes, InitialValue, StaticInit, Symbol, Symbols, Type};
-
+mod consteval;
 mod declarations;
 mod functions;
 mod goto;
 mod loops;
 mod switch;
-mod typechecking;
+mod typecheck;
 
 pub fn validate_program(program: &mut Program, diagnostics: &mut Diagnostics) -> Option<Symbols> {
     add_return_zero(program);
@@ -74,7 +74,7 @@ fn replace_compound_assign_with_assign_binary(program: &mut Program) {
                 match block_item {
                     BlockItem::Stmt(s) => s.process_inner_expressions_mut(&mut (), &f),
                     BlockItem::Decl(d) => match d {
-                        crate::parser::Declaration::Var(VariableDeclaration {
+                        crate::syntax::Declaration::Var(VariableDeclaration {
                             init: Some(init),
                             ..
                         }) => {

@@ -1,10 +1,10 @@
-use std::{fmt, ops::Range};
+use std::fmt;
 
 use ariadne::{Color, Report, ReportKind, Source};
 
-use crate::sourcemap::LineMap;
+use crate::core::LineMap;
 
-pub type Span = Range<usize>;
+pub use crate::core::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {

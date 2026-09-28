@@ -1,4 +1,3 @@
-use crate::ir;
 use crate::lexer::Token;
 
 pub const CONDITIONAL_PRECEDENCE: u32 = 10;
@@ -66,14 +65,6 @@ pub enum UnaryOperator {
 }
 
 impl UnaryOperator {
-    pub fn lower(self) -> ir::UnaryOperator {
-        match self {
-            Self::BitwiseNot => ir::UnaryOperator::BitwiseNot,
-            Self::Negate => ir::UnaryOperator::Negate,
-            Self::Not => ir::UnaryOperator::Not,
-        }
-    }
-
     pub fn symbol(self) -> &'static str {
         match self {
             Self::BitwiseNot => "~",
@@ -272,40 +263,6 @@ impl BinaryOperator {
             Self::BitwiseOrAssign => "|=",
             Self::LeftShiftAssign => "<<=",
             Self::RightShiftAssign => ">>=",
-        }
-    }
-
-    pub fn lower(self) -> ir::BinaryOperator {
-        match self {
-            Self::Add => ir::BinaryOperator::Add,
-            Self::Subtract => ir::BinaryOperator::Subtract,
-            Self::Multiply => ir::BinaryOperator::Multiply,
-            Self::Divide => ir::BinaryOperator::Divide,
-            Self::Remainder => ir::BinaryOperator::Remainder,
-            Self::LeftShift => ir::BinaryOperator::LeftShift,
-            Self::RightShift => ir::BinaryOperator::RightShift,
-            Self::BitwiseAnd => ir::BinaryOperator::BitwiseAnd,
-            Self::BitwiseXor => ir::BinaryOperator::BitwiseXor,
-            Self::BitwiseOr => ir::BinaryOperator::BitwiseOr,
-            Self::NotEqual => ir::BinaryOperator::NotEqual,
-            Self::LessThan => ir::BinaryOperator::LessThan,
-            Self::LessEqual => ir::BinaryOperator::LessEqual,
-            Self::GreaterThan => ir::BinaryOperator::GreaterThan,
-            Self::GreaterEqual => ir::BinaryOperator::GreaterEqual,
-            Self::Equal => ir::BinaryOperator::Equal,
-            Self::And
-            | Self::Or
-            | Self::Assign
-            | Self::AddAssign
-            | Self::SubtractAssign
-            | Self::MultiplyAssign
-            | Self::DivideAssign
-            | Self::RemainderAssign
-            | Self::BitwiseAndAssign
-            | Self::BitwiseXorAssign
-            | Self::BitwiseOrAssign
-            | Self::LeftShiftAssign
-            | Self::RightShiftAssign => unimplemented!(),
         }
     }
 

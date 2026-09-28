@@ -1,22 +1,16 @@
-use std::collections::HashMap;
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 
-use crate::analysis::Type;
-use crate::diagnostics::{Diagnostic, Span, Stage};
-use crate::lexer::{SpannedToken, Token};
+use crate::{
+    core::{Constant, FunctionParameter, Identifier, Span, StorageClass, Type},
+    diagnostics::{Diagnostic, Stage},
+    lexer::{SpannedToken, Token},
+    syntax::{ast::*, operators::*},
+};
 
-pub use ast::*;
-mod ast;
-mod debug;
-mod eval;
-mod lowering;
-mod operators;
-pub use operators::*;
-
-struct Parser {
+pub struct Parser {
     source: String,
     tokens: Vec<SpannedToken>,
-    errors: Vec<Diagnostic>,
+    pub errors: Vec<Diagnostic>,
     i: usize,
 }
 
@@ -29,7 +23,7 @@ fn expected_msg(expected: impl Display, found: Token) -> String {
 }
 
 impl Parser {
-    fn new(source: String, tokens: Vec<SpannedToken>) -> Self {
+    pub fn new(source: String, tokens: Vec<SpannedToken>) -> Self {
         Self {
             source,
             tokens,
@@ -38,7 +32,7 @@ impl Parser {
         }
     }
 
-    fn parse(&mut self) -> Option<Program> {
+    pub fn parse(&mut self) -> Option<Program> {
         let mut declarations = vec![];
         while self.peek().is_some_and(|&t| t != Token::EndOfInput) {
             declarations.push(self.declaration()?);
@@ -60,7 +54,7 @@ impl Parser {
         Some(self.tokens.get(self.i.checked_sub(1)?)?.span.clone())
     }
 
-    fn eof_span(&self) -> Span {
+    pub fn eof_span(&self) -> Span {
         self.source.len()..self.source.len()
     }
 
@@ -845,25 +839,5 @@ impl Parser {
     fn peek_binary_operator(&self) -> Option<BinaryOperator> {
         let token = self.peek()?;
         BinaryOperator::from_token(*token)
-    }
-}
-
-pub fn parse(source: String, tokens: Vec<SpannedToken>) -> Result<Program, Vec<Diagnostic>> {
-    let mut parser = Parser::new(source, tokens);
-    let program = parser.parse();
-
-    match program {
-        Some(program) if parser.errors.is_empty() => Ok(program),
-        _ => {
-            if parser.errors.is_empty() {
-                let span = parser.eof_span();
-                parser.errors.push(Diagnostic::new(
-                    Stage::Parse,
-                    span,
-                    "unexpected end of input",
-                ));
-            }
-            Err(parser.errors)
-        }
     }
 }

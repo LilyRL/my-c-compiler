@@ -1,15 +1,10 @@
 use std::collections::HashMap;
 
-use strum::{EnumDiscriminants, EnumIs, IntoDiscriminant};
 
 use super::operators::{BinaryOperator, IncDec, UnaryOperator};
-use crate::{
-    analysis::{StaticInit, Type},
-    diagnostics::Span,
-};
+use crate::core::{Constant, FunctionParameter, Identifier, Span, StorageClass, Type};
 
-pub use identifier::Identifier;
-mod identifier;
+pub use crate::core::Specifier;
 
 #[derive(Debug)]
 pub struct Program(pub Vec<Declaration>);
@@ -43,33 +38,6 @@ pub struct FunctionDeclaration {
     pub return_type: Type,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub enum Specifier {
-    Int,
-    Long,
-    Unsigned,
-    Signed,
-    Static,
-    Extern,
-}
-
-impl Specifier {
-    pub fn storage_class(&self) -> StorageClass {
-        match self {
-            Specifier::Static => StorageClass::Static,
-            Specifier::Extern => StorageClass::Extern,
-            _ => StorageClass::None,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct FunctionParameter {
-    pub name: Identifier,
-    pub span: Span,
-    pub ty: Type,
-}
-
 #[derive(Debug)]
 pub struct VariableDeclaration {
     pub name: Identifier,
@@ -83,13 +51,6 @@ pub struct VariableDeclaration {
 pub enum Declaration {
     Func(FunctionDeclaration),
     Var(VariableDeclaration),
-}
-
-#[derive(Debug, EnumIs)]
-pub enum StorageClass {
-    Static,
-    Extern,
-    None,
 }
 
 #[derive(Debug)]
@@ -233,103 +194,6 @@ impl Expression {
         match &self.kind {
             ExprKind::Var(i) => Some(i),
             _ => None,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Hash, Eq, PartialOrd, Ord, Clone, Copy, EnumDiscriminants)]
-#[strum_discriminants(name(ConstantType))]
-pub enum Constant {
-    Int(i32),
-    UInt(u32),
-    Long(i64),
-    ULong(u64),
-}
-
-impl Constant {
-    pub fn from_magnitude(magnitude: u128, ty: ConstantType) -> Self {
-        match ty {
-            ConstantType::Int => Constant::Int(magnitude as i32),
-            ConstantType::UInt => Constant::UInt(magnitude as u32),
-            ConstantType::Long => Constant::Long(magnitude as i64),
-            ConstantType::ULong => Constant::ULong(magnitude as u64),
-        }
-    }
-
-    pub fn i64(&self) -> i64 {
-        match self {
-            Constant::Int(i) => *i as i64,
-            Constant::Long(l) => *l,
-            Constant::UInt(u) => *u as i64,
-            Constant::ULong(ul) => *ul as i64,
-        }
-    }
-
-    pub fn is_zero(&self) -> bool {
-        match self {
-            Constant::Int(i) => *i == 0,
-            Constant::Long(l) => *l == 0,
-            Constant::UInt(u) => *u == 0,
-            Constant::ULong(ul) => *ul == 0,
-        }
-    }
-
-    pub fn from_int(i: i32, ty: ConstantType) -> Self {
-        match ty {
-            ConstantType::Int => Constant::Int(i),
-            ConstantType::Long => Constant::Long(i as i64),
-            ConstantType::UInt => Constant::UInt(i as u32),
-            ConstantType::ULong => Constant::ULong(i as u64),
-        }
-    }
-
-    pub fn to_common_pair(self, other: Self) -> (Self, Self) {
-        if self.discriminant() == other.discriminant() {
-            (self, other)
-        } else {
-            (self.cast_long(), other.cast_long())
-        }
-    }
-
-    pub fn cast_long(self) -> Self {
-        self.cast(ConstantType::Long)
-    }
-
-    fn bits(self) -> u128 {
-        match self {
-            Constant::Int(i) => i as i128 as u128,
-            Constant::UInt(u) => u as u128,
-            Constant::Long(l) => l as i128 as u128,
-            Constant::ULong(ul) => ul as u128,
-        }
-    }
-
-    pub fn cast(self, const_ty: ConstantType) -> Constant {
-        let bits = self.bits();
-
-        match const_ty {
-            ConstantType::Int => Constant::Int(bits as i32),
-            ConstantType::UInt => Constant::UInt(bits as u32),
-            ConstantType::Long => Constant::Long(bits as i64),
-            ConstantType::ULong => Constant::ULong(bits as u64),
-        }
-    }
-
-    pub fn to_static_init(self) -> StaticInit {
-        match self {
-            Constant::Int(i) => StaticInit::Int(i),
-            Constant::UInt(u) => StaticInit::UInt(u),
-            Constant::Long(l) => StaticInit::Long(l),
-            Constant::ULong(ul) => StaticInit::ULong(ul),
-        }
-    }
-
-    pub fn ty(&self) -> Type {
-        match self {
-            Constant::Int(_) => Type::Int,
-            Constant::Long(_) => Type::Long,
-            Constant::UInt(_) => Type::UInt,
-            Constant::ULong(_) => Type::ULong,
         }
     }
 }

@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use strum::EnumIs;
 
 use crate::{
-    diagnostics::{Diagnostics, Span},
-    parser::{
+    core::{FunctionParameter, Identifier, Span},
+    diagnostics::Diagnostics,
+    syntax::{
         Block, BlockItem, Declaration, ExprKind, Expression, ForInit, FunctionDeclaration,
-        FunctionParameter, Identifier, Program, Statement, StmtKind, VariableDeclaration,
+        Program, Statement, StmtKind, VariableDeclaration,
     },
 };
 

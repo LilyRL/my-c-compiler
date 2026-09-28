@@ -1,7 +1,12 @@
 use super::*;
 use crate::{
-    analysis::{IdentifierAttributes, InitialValue, StaticInit, Symbol, Symbols},
-    ir::{self, StaticVariable, TopLevel},
+    core::{Constant, Identifier, IdentifierAttributes, InitialValue, StaticInit, Symbol, Symbols, Type},
+    ir as ir,
+    syntax::{
+        BinaryOperator as SyntaxBinaryOperator, BlockItem, Declaration, ExprKind, Expression,
+        ForInit, FunctionDeclaration, Program, Statement, StmtKind, Switch, UnaryOperator as
+        SyntaxUnaryOperator, VariableDeclaration,
+    },
 };
 use ir::{Instruction, Value};
 
@@ -344,7 +349,7 @@ impl Expression {
                 return dst;
             }
             ExprKind::Binary { operator, lhs, rhs } => match operator {
-                BinaryOperator::And => {
+                SyntaxBinaryOperator::And => {
                     let dst_name = Identifier::new("and_result");
                     let dst = Value::Var(dst_name.clone());
                     symbols.insert(dst_name, Symbol::temporary(Type::Int));
@@ -377,7 +382,7 @@ impl Expression {
 
                     return dst;
                 }
-                BinaryOperator::Or => {
+                SyntaxBinaryOperator::Or => {
                     let dst_name = Identifier::new("or_result");
                     let dst = Value::Var(dst_name.clone());
                     symbols.insert(dst_name, Symbol::temporary(Type::Int));
@@ -558,6 +563,52 @@ impl Constant {
             Constant::Long(l) => ir::Value::Constant(Constant::Long(l)),
             Constant::UInt(i) => ir::Value::Constant(Constant::UInt(i)),
             Constant::ULong(i) => ir::Value::Constant(Constant::ULong(i)),
+        }
+    }
+}
+
+impl SyntaxUnaryOperator {
+    pub fn lower(self) -> ir::UnaryOperator {
+        match self {
+            Self::BitwiseNot => ir::UnaryOperator::BitwiseNot,
+            Self::Negate => ir::UnaryOperator::Negate,
+            Self::Not => ir::UnaryOperator::Not,
+        }
+    }
+}
+
+impl SyntaxBinaryOperator {
+    pub fn lower(self) -> ir::BinaryOperator {
+        match self {
+            Self::Add => ir::BinaryOperator::Add,
+            Self::Subtract => ir::BinaryOperator::Subtract,
+            Self::Multiply => ir::BinaryOperator::Multiply,
+            Self::Divide => ir::BinaryOperator::Divide,
+            Self::Remainder => ir::BinaryOperator::Remainder,
+            Self::LeftShift => ir::BinaryOperator::LeftShift,
+            Self::RightShift => ir::BinaryOperator::RightShift,
+            Self::BitwiseAnd => ir::BinaryOperator::BitwiseAnd,
+            Self::BitwiseXor => ir::BinaryOperator::BitwiseXor,
+            Self::BitwiseOr => ir::BinaryOperator::BitwiseOr,
+            Self::NotEqual => ir::BinaryOperator::NotEqual,
+            Self::LessThan => ir::BinaryOperator::LessThan,
+            Self::LessEqual => ir::BinaryOperator::LessEqual,
+            Self::GreaterThan => ir::BinaryOperator::GreaterThan,
+            Self::GreaterEqual => ir::BinaryOperator::GreaterEqual,
+            Self::Equal => ir::BinaryOperator::Equal,
+            Self::And
+            | Self::Or
+            | Self::Assign
+            | Self::AddAssign
+            | Self::SubtractAssign
+            | Self::MultiplyAssign
+            | Self::DivideAssign
+            | Self::RemainderAssign
+            | Self::BitwiseAndAssign
+            | Self::BitwiseXorAssign
+            | Self::BitwiseOrAssign
+            | Self::LeftShiftAssign
+            | Self::RightShiftAssign => unimplemented!(),
         }
     }
 }

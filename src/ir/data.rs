@@ -1,10 +1,6 @@
 use strum::IntoDiscriminant;
 
-use crate::{
-    analysis::{StaticInit, Symbols, Type},
-    codegen::AssemblyType,
-    parser::{Constant, ConstantType, FunctionParameter, Identifier},
-};
+use crate::core::{Constant, ConstantType, FunctionParameter, Identifier, StaticInit, Symbols, Type};
 
 #[derive(Debug)]
 pub struct Program(pub Vec<TopLevel>);
@@ -125,11 +121,5 @@ impl Value {
             Value::Constant(c) => Some(c.discriminant()),
             Value::Var(i) => symbols.get(i).unwrap().ty.to_constant(),
         }
-    }
-
-    pub fn asm_type(&self, symbols: &Symbols) -> AssemblyType {
-        self.ty(symbols)
-            .to_asm_type()
-            .expect("functions are never used as values")
     }
 }

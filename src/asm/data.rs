@@ -1,6 +1,6 @@
 use strum::EnumIs;
 
-use crate::{analysis::StaticInit, parser::Identifier};
+use crate::core::{Identifier, StaticInit};
 
 #[derive(Debug)]
 pub struct Program(pub Vec<TopLevel>);

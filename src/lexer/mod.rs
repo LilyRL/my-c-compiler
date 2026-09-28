@@ -3,8 +3,8 @@ use std::{fmt::Display, ops::Range};
 use strum::EnumIs;
 
 use crate::{
+    core::{Constant, ConstantType, Specifier},
     diagnostics::{Diagnostic, Stage},
-    parser::{Constant, ConstantType, Specifier},
 };
 
 mod hash;

@@ -1,8 +1,10 @@
-use super::*;
-
 use crate::{
-    analysis::Symbols,
-    codegen::{self, AX, AssemblyType, CondCode, DX, Operand, Register},
+    asm::{self as codegen, AssemblyType, CondCode, Operand, Register, AX, DX},
+    core::Symbols,
+    ir::{
+        BinaryOperator, FunctionDefinition, Instruction, Program, StaticVariable, TopLevel,
+        UnaryOperator, Value,
+    },
 };
 
 const ARG_REGISTERS: [Register; 6] = {

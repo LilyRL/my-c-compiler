@@ -1,4 +1,4 @@
-use crate::os::{TargetOs, target_os};
+use crate::target::{TargetOs, target_os};
 use std::{
     fmt::Display,
     sync::atomic::{AtomicUsize, Ordering},
@@ -15,19 +15,20 @@ impl Display for Identifier {
     }
 }
 
-fn base64_encode(mut n: usize) -> String {
-    const CHARS: [char; 64] = [
+fn base62_encode(mut n: usize) -> String {
+    const N: usize = 62;
+    const CHARS: [char; N] = [
         'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r',
         's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
         'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1',
-        '2', '3', '4', '5', '6', '7', '8', '9', '_', '.',
+        '2', '3', '4', '5', '6', '7', '8', '9',
     ];
 
     let mut s = String::new();
 
     while n != 0 {
-        let q = n % 64;
-        n /= 64;
+        let q = n % N;
+        n /= N;
 
         s.push(CHARS[q]);
     }
@@ -40,7 +41,7 @@ impl Identifier {
         let n = IDENT_COUNTER.load(Ordering::Relaxed);
         IDENT_COUNTER.fetch_add(1, Ordering::Relaxed);
 
-        base64_encode(n)
+        base62_encode(n)
     }
 
     pub fn new(name: impl Display) -> Self {

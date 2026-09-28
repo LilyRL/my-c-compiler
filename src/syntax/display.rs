@@ -1,5 +1,7 @@
-use super::*;
 use std::fmt::Display;
+
+use super::ast::{ExprKind, Expression};
+use crate::core::Constant;
 
 impl Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

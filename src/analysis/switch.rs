@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
-    diagnostics::{Diagnostics, Span},
-    parser::{
-        BlockItem, Constant, ConstantType, Identifier, Program, Statement, StmtKind, SwitchCase,
-    },
+    core::{Constant, ConstantType, Identifier, Span},
+    diagnostics::Diagnostics,
+    syntax::{BlockItem, Program, Statement, StmtKind, SwitchCase},
 };
 
 #[derive(Debug)]

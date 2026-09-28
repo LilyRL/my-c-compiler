@@ -1,6 +1,7 @@
 use crate::{
+    core::Identifier,
     diagnostics::Diagnostics,
-    parser::{BlockItem, Identifier, Program, Statement, StmtKind},
+    syntax::{BlockItem, Program, Statement, StmtKind},
 };
 
 pub fn label_all_loops(program: &mut Program, diagnostics: &mut Diagnostics) {
