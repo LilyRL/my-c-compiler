@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    fmt::Display,
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::collections::HashMap;
 
 use strum::{EnumDiscriminants, EnumIs, IntoDiscriminant};
 
@@ -11,6 +7,9 @@ use crate::{
     analysis::{StaticInit, Type},
     diagnostics::Span,
 };
+
+pub use identifier::Identifier;
+mod identifier;
 
 #[derive(Debug)]
 pub struct Program(pub Vec<Declaration>);

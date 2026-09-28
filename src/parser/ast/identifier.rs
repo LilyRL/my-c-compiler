@@ -1,4 +1,8 @@
 use crate::os::{TargetOs, target_os};
+use std::{
+    fmt::Display,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 static IDENT_COUNTER: AtomicUsize = AtomicUsize::new(0);
 

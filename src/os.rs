@@ -20,8 +20,8 @@ pub enum TargetOs {
     MacOs,
 }
 
-pub fn handle_target_os_arguement(arg: String) {
-    match arg.as_str() {
+pub fn handle_target_os_arguement(arg: &str) {
+    match arg {
         "linux" => set_target_os(TargetOs::Linux),
         "macos" => set_target_os(TargetOs::MacOs),
         #[cfg(target_os = "linux")]

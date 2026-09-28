@@ -11,7 +11,7 @@ use lexer::lex;
 use parser::parse;
 use sourcemap::LineMap;
 
-use crate::analysis::validate_program;
+use crate::{analysis::validate_program, os::handle_target_os_arguement};
 
 mod analysis;
 mod codegen;
@@ -179,6 +179,8 @@ fn compile_pipeline(
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    handle_target_os_arguement(&args.target_os);
+
     let paths = Paths::new(&args);
     let file_name = paths.input.to_string_lossy();
 
