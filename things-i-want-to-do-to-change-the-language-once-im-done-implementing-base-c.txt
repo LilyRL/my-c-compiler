@@ -10,11 +10,11 @@
 - traits
 - define operators like in haskell
 - macros. but simpler than that. maybe they can just take arguments like a function, if you want them to. or of course source code. and emit with an emit keyword?
-=======
 - like how zig handles structs and stuff. really cool
 - logical integer type names
 - disambiguate grammar
   - fn foo(bar: Baz) -> Baz;
   - let x: i32 = 0;
   - replace static/extern with pub priv in global scope
->>>>>>> d362dd2 (chapter 11!!)
+- approximately equal operator
+- logical xor
