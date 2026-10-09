@@ -6,7 +6,6 @@
 - storage class must come before type, like strict order for specifiers instead
   of being able to write `int static i = 0`
 - tagged unions
-<<<<<<< HEAD
 - traits
 - define operators like in haskell
 - macros. but simpler than that. maybe they can just take arguments like a function, if you want them to. or of course source code. and emit with an emit keyword?
