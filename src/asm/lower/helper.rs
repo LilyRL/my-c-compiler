@@ -217,10 +217,9 @@ impl<'a> Lowering<'a> {
                 alignment,
             })
             .name
-            .0
             .clone();
 
-        Operand::Data(name)
+        Operand::Constant(name)
     }
 
     pub fn new_label(&mut self, name: &str) -> Identifier {

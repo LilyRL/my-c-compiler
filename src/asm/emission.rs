@@ -90,13 +90,17 @@ impl StaticInit {
 fn static_data(
     name: &Identifier,
     global: bool,
+    local: bool,
     section: &str,
     alignment_directive: &str,
     body: &str,
 ) -> String {
     let target = target();
     let global_directive = target.global_directive(&name.0, global);
-    let name = target.decorate_symbol(&name.0, global);
+    let name = match local {
+        true => target.local_label(&name.0),
+        false => target.decorate_symbol(&name.0, global),
+    };
 
     format!(
         r#"
@@ -128,6 +132,7 @@ impl StaticConstant {
         static_data(
             &self.name,
             false,
+            true,
             ".section .rodata",
             &align_directive,
             &body,
@@ -147,6 +152,7 @@ impl StaticVariable {
         static_data(
             &self.name,
             self.global,
+            false,
             section,
             &format!(".balign {}", self.alignment),
             &body,
@@ -262,10 +268,14 @@ impl Instruction {
                 }
             }
             Self::Jump(label) => {
-                lines.push(format!("    jmp {}", label.0));
+                lines.push(format!("    jmp {}", target().local_label(&label.0)));
             }
             Self::JumpCC(cond_code, label) => {
-                lines.push(format!("    j{} {}", cond_code.format(), label.0));
+                lines.push(format!(
+                    "    j{} {}",
+                    cond_code.format(),
+                    target().local_label(&label.0)
+                ));
             }
             Self::SetCC(cond_code, operand) => {
                 lines.push(format!(
@@ -275,7 +285,7 @@ impl Instruction {
                 ));
             }
             Self::Label(label) => {
-                lines.push(format!("{}:", label.0));
+                lines.push(format!("{}:", target().local_label(&label.0)));
             }
             Self::Comment(c) => lines.push(format!("    # {}", c)),
             Self::Call(name) => {
@@ -436,8 +446,9 @@ impl Operand {
                 }
                 .to_string()
             }
-            Self::Stack(offset) => format!("{}(%rbp)", offset),
+            Self::Stack(offset) => format!("{offset}(%rbp)"),
             Self::Data(name) => format!("{name}(%rip)"),
+            Self::Constant(name) => format!("{}(%rip)", target().local_label(&name.0)),
             Self::Pseudo(_) => unimplemented!(),
         }
     }

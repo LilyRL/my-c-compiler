@@ -247,6 +247,7 @@ pub enum Operand {
     Pseudo(Identifier),
     Stack(i32),
     Data(String),
+    Constant(Identifier),
 }
 
 impl Register {
@@ -352,7 +353,7 @@ impl UnaryOperator {
 impl Operand {
     #[must_use]
     pub fn is_memory(&self) -> bool {
-        matches!(self, Self::Stack(_) | Self::Data(_))
+        matches!(self, Self::Stack(_) | Self::Data(_) | Self::Constant(_))
     }
 
     pub fn is_register(&self) -> bool {

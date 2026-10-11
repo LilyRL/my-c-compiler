@@ -234,7 +234,7 @@ impl Parser {
                 Some(Statement::new(StmtKind::Compound(block), span))
             }
             Token::Ident if self.double_peek() == Some(&Token::Colon) => {
-                let name = self.ident()?.with_suffix(".goto_label").local();
+                let name = self.ident()?.with_suffix(".goto_label");
                 let start = self.prev_span()?;
                 self.next()?;
                 let stmt = Box::new(self.statement()?);
@@ -244,7 +244,7 @@ impl Parser {
             Token::Goto => {
                 let start = self.peek_span()?;
                 self.next()?;
-                let name = self.ident()?.with_suffix(".goto_label").local();
+                let name = self.ident()?.with_suffix(".goto_label");
                 self.consume(Token::Semicolon)?;
                 let span = start.start..self.prev_span()?.end;
                 Some(Statement::new(StmtKind::Goto(name), span))

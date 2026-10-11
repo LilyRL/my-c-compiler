@@ -50,6 +50,13 @@ impl Target {
         }
     }
 
+    pub fn local_label(&self, name: &str) -> String {
+        match self.binary_format {
+            BinaryFormat::Elf => format!(".L{name}"),
+            BinaryFormat::Mach => format!("L{name}"),
+        }
+    }
+
     pub fn global_directive(&self, name: &str, global: bool) -> String {
         let name = self.decorate_symbol(name, global);
         match (global, self.binary_format) {

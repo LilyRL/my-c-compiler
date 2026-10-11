@@ -1,4 +1,3 @@
-use crate::target::{BinaryFormat, target};
 use std::{
     fmt::Display,
     sync::atomic::{AtomicUsize, Ordering},
@@ -46,21 +45,11 @@ impl Identifier {
 
     #[inline]
     pub fn new(name: impl Display) -> Self {
-        match target().binary_format {
-            BinaryFormat::Elf => Self(format!(".L_{name}.{}", Self::next()), name.to_string()),
-            BinaryFormat::Mach => Self(format!("L_{name}.{}", Self::next()), name.to_string()),
-        }
+        Self(format!("{name}.{}", Self::next()), name.to_string())
     }
 
     pub fn new_raw(name: &str) -> Self {
         return Self(name.to_string(), name.to_string());
-    }
-
-    pub fn local(&self) -> Self {
-        match target().binary_format {
-            BinaryFormat::Elf => Self(format!(".L_{}", self.0), self.1.clone()),
-            BinaryFormat::Mach => Self(format!("L_{}", self.0), self.1.clone()),
-        }
     }
 
     pub fn with_suffix(&self, suffix: impl Display) -> Self {
