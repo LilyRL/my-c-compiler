@@ -1,6 +1,8 @@
 use strum::IntoDiscriminant;
 
-use crate::core::{Constant, ConstantType, FunctionParameter, Identifier, StaticInit, Symbols, Type};
+use crate::core::{
+    Constant, ConstantType, FunctionParameter, Identifier, StaticInit, Symbols, Type,
+};
 
 #[derive(Debug)]
 pub struct Program(pub Vec<TopLevel>);
@@ -70,6 +72,46 @@ pub enum Instruction {
         dst: Value,
     },
     ZeroExtend {
+        src: Value,
+        dst: Value,
+    },
+    DoubleToInt {
+        src: Value,
+        dst: Value,
+    },
+    DoubleToUInt {
+        src: Value,
+        dst: Value,
+    },
+    DoubleToFloat {
+        src: Value,
+        dst: Value,
+    },
+    FloatToInt {
+        src: Value,
+        dst: Value,
+    },
+    FloatToUInt {
+        src: Value,
+        dst: Value,
+    },
+    FloatToDouble {
+        src: Value,
+        dst: Value,
+    },
+    IntToFloat {
+        src: Value,
+        dst: Value,
+    },
+    IntToDouble {
+        src: Value,
+        dst: Value,
+    },
+    UIntToFloat {
+        src: Value,
+        dst: Value,
+    },
+    UIntToDouble {
         src: Value,
         dst: Value,
     },

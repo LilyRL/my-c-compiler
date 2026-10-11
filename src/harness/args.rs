@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use clap::Parser;
+use clap::{ArgAction, Parser};
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -42,8 +42,31 @@ pub struct Args {
     #[arg(short = 'c', default_value_t = false)]
     pub generate_object: bool,
 
-    #[arg(short = 't', long = "target", default_value_t = String::from("host"))]
-    pub target_os: String,
+    /// Target binary format: 'linux', 'macos', or 'host'
+    #[arg(short = 'f', long = "binary-format", default_value_t = String::from("host"))]
+    pub binary_format: String,
+
+    /// Target word size in bits: '32', '64', or 'host'
+    #[arg(long = "word-size", default_value_t = String::from("host"))]
+    pub word_size: String,
+
+    /// Use AVX instructions for floating point operations
+    #[arg(long = "use-avx", default_value_t = false)]
+    pub use_avx: bool,
+
+    /// Use accurate float conversions (slower)
+    #[arg(long = "accurate-float-conversions", default_value_t = true)]
+    pub accurate_float_conversions: bool,
+
+    /// Libraries to link to
+    #[arg(
+        short = 'l',
+        long = "link",
+        action = ArgAction::Append,
+        value_delimiter = ',',
+        num_args = 1..
+    )]
+    pub link: Vec<String>,
 }
 
 #[derive(Debug)]

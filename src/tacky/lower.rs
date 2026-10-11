@@ -1,17 +1,18 @@
 use super::*;
 use crate::{
-    core::{Constant, Identifier, IdentifierAttributes, InitialValue, StaticInit, Symbol, Symbols, Type},
-    ir as ir,
+    core::{
+        Constant, Identifier, IdentifierAttributes, InitialValue, StaticInit, Symbol, Symbols, Type,
+    },
     syntax::{
         BinaryOperator as SyntaxBinaryOperator, BlockItem, Declaration, ExprKind, Expression,
-        ForInit, FunctionDeclaration, Program, Statement, StmtKind, Switch, UnaryOperator as
-        SyntaxUnaryOperator, VariableDeclaration,
+        ForInit, FunctionDeclaration, Program, Statement, StmtKind, Switch,
+        UnaryOperator as SyntaxUnaryOperator, VariableDeclaration,
     },
+    tacky::{self, Instruction, Value},
 };
-use ir::{Instruction, Value};
 
 impl Program {
-    pub fn lower(self, symbols: &mut Symbols) -> ir::Program {
+    pub fn lower(self, symbols: &mut Symbols) -> tacky::Program {
         let mut definitions = self
             .0
             .into_iter()
@@ -23,7 +24,7 @@ impl Program {
 
         definitions.extend(Self::lower_static_variables(symbols));
 
-        ir::Program(definitions)
+        tacky::Program(definitions)
     }
 
     fn lower_static_variables(symbols: &Symbols) -> Vec<TopLevel> {
@@ -41,6 +42,8 @@ impl Program {
                         Type::Long => StaticInit::Long(0),
                         Type::UInt => StaticInit::UInt(0),
                         Type::ULong => StaticInit::ULong(0),
+                        Type::Float => StaticInit::Float(0.0),
+                        Type::Double => StaticInit::Double(0.0),
                         Type::Function(_) => unreachable!(),
                     },
                     InitialValue::None => return None,
@@ -66,7 +69,7 @@ impl Program {
 }
 
 impl FunctionDeclaration {
-    pub fn lower(self, symbols: &mut Symbols) -> Option<ir::FunctionDefinition> {
+    pub fn lower(self, symbols: &mut Symbols) -> Option<tacky::FunctionDefinition> {
         let mut instructions = Vec::new();
 
         let global = symbols
@@ -78,7 +81,7 @@ impl FunctionDeclaration {
             statement.lower(symbols, &mut instructions);
         }
 
-        Some(ir::FunctionDefinition {
+        Some(tacky::FunctionDefinition {
             params: self.params,
             name: self.name,
             body: instructions,
@@ -241,7 +244,7 @@ impl Statement {
                 for (label, constant) in cases {
                     let case_value = Value::Constant(constant);
                     instructions.push(Instruction::Binary {
-                        operator: ir::BinaryOperator::Equal,
+                        operator: tacky::BinaryOperator::Equal,
                         lhs: case_value,
                         rhs: result.clone(),
                         dst: is_equal.clone(),
@@ -322,7 +325,12 @@ impl Expression {
             ExprKind::Unary { operator, expr } => {
                 let dst_name = Identifier::new("tmp");
                 let dst = Value::Var(dst_name.clone());
-                symbols.insert(dst_name, Symbol::temporary(expr.ty.clone()));
+
+                let ty = match operator {
+                    crate::syntax::UnaryOperator::Not => Type::Int,
+                    _ => expr.ty.clone(),
+                };
+                symbols.insert(dst_name, Symbol::temporary(ty));
 
                 let src = expr.lower(symbols, instructions);
 
@@ -336,7 +344,14 @@ impl Expression {
             ExprKind::Binary { operator, lhs, rhs } if operator.can_be_lowered() => {
                 let dst_name = Identifier::new(operator.name());
                 let dst = Value::Var(dst_name.clone());
-                symbols.insert(dst_name, Symbol::temporary(lhs.ty.clone()));
+
+                let ty = if operator.is_comparison() {
+                    Type::Int
+                } else {
+                    lhs.ty.clone()
+                };
+
+                symbols.insert(dst_name, Symbol::temporary(ty));
                 let lhs = lhs.lower(symbols, instructions);
                 let rhs = rhs.lower(symbols, instructions);
 
@@ -352,7 +367,7 @@ impl Expression {
                 SyntaxBinaryOperator::And => {
                     let dst_name = Identifier::new("and_result");
                     let dst = Value::Var(dst_name.clone());
-                    symbols.insert(dst_name, Symbol::temporary(Type::Int));
+                    symbols.insert(dst_name, Symbol::temporary(result_ty(&lhs)));
                     let false_label = Identifier::new("and_false");
                     let end_label = Identifier::new("and_end");
 
@@ -385,7 +400,7 @@ impl Expression {
                 SyntaxBinaryOperator::Or => {
                     let dst_name = Identifier::new("or_result");
                     let dst = Value::Var(dst_name.clone());
-                    symbols.insert(dst_name, Symbol::temporary(Type::Int));
+                    symbols.insert(dst_name, Symbol::temporary(result_ty(&lhs)));
                     let true_label = Identifier::new("or_true");
                     let end_label = Identifier::new("or_end");
 
@@ -528,7 +543,62 @@ impl Expression {
                 let src_size = src_type.size_bytes();
                 let target_size = target_type.size_bytes();
 
-                if src_size == target_size {
+                if src_type == target_type {
+                    instructions.push(Instruction::Copy {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_float() && target_type.is_double() {
+                    instructions.push(Instruction::FloatToDouble {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_double() && target_type.is_float() {
+                    instructions.push(Instruction::DoubleToFloat {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_float() && target_type.is_int() {
+                    instructions.push(Instruction::FloatToInt {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_float() && target_type.is_u_int() {
+                    instructions.push(Instruction::FloatToUInt {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_double() && target_type.is_int() {
+                    instructions.push(Instruction::DoubleToInt {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_double() && target_type.is_u_int() {
+                    instructions.push(Instruction::DoubleToUInt {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_int() && target_type.is_float() {
+                    instructions.push(Instruction::IntToFloat {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_u_int() && target_type.is_float() {
+                    instructions.push(Instruction::UIntToFloat {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_int() && target_type.is_double() {
+                    instructions.push(Instruction::IntToDouble {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_type.is_u_int() && target_type.is_double() {
+                    instructions.push(Instruction::UIntToDouble {
+                        src: result,
+                        dst: dst.clone(),
+                    });
+                } else if src_size == target_size {
                     instructions.push(Instruction::Copy {
                         src: result,
                         dst: dst.clone(),
@@ -538,16 +608,18 @@ impl Expression {
                         src: result,
                         dst: dst.clone(),
                     });
-                } else if src_type.is_signed() {
-                    instructions.push(Instruction::SignExtend {
-                        src: result,
-                        dst: dst.clone(),
-                    });
-                } else {
-                    instructions.push(Instruction::ZeroExtend {
-                        src: result,
-                        dst: dst.clone(),
-                    });
+                } else if src_size < target_size {
+                    if src_type.is_signed_int() {
+                        instructions.push(Instruction::SignExtend {
+                            src: result,
+                            dst: dst.clone(),
+                        });
+                    } else {
+                        instructions.push(Instruction::ZeroExtend {
+                            src: result,
+                            dst: dst.clone(),
+                        });
+                    }
                 }
 
                 dst
@@ -557,45 +629,54 @@ impl Expression {
 }
 
 impl Constant {
-    pub fn lower(self) -> ir::Value {
+    pub fn lower(self) -> tacky::Value {
         match self {
-            Constant::Int(i) => ir::Value::Constant(Constant::Int(i)),
-            Constant::Long(l) => ir::Value::Constant(Constant::Long(l)),
-            Constant::UInt(i) => ir::Value::Constant(Constant::UInt(i)),
-            Constant::ULong(i) => ir::Value::Constant(Constant::ULong(i)),
+            Constant::Int(i) => tacky::Value::Constant(Constant::Int(i)),
+            Constant::Long(l) => tacky::Value::Constant(Constant::Long(l)),
+            Constant::UInt(i) => tacky::Value::Constant(Constant::UInt(i)),
+            Constant::ULong(i) => tacky::Value::Constant(Constant::ULong(i)),
+            Constant::Float(f) => tacky::Value::Constant(Constant::Float(f)),
+            Constant::Double(d) => tacky::Value::Constant(Constant::Double(d)),
         }
     }
 }
 
+fn result_ty(lhs: &Expression) -> Type {
+    match lhs.ty.is_floating_point() {
+        true => lhs.ty.clone(),
+        false => Type::Int,
+    }
+}
+
 impl SyntaxUnaryOperator {
-    pub fn lower(self) -> ir::UnaryOperator {
+    pub fn lower(self) -> tacky::UnaryOperator {
         match self {
-            Self::BitwiseNot => ir::UnaryOperator::BitwiseNot,
-            Self::Negate => ir::UnaryOperator::Negate,
-            Self::Not => ir::UnaryOperator::Not,
+            Self::BitwiseNot => tacky::UnaryOperator::BitwiseNot,
+            Self::Negate => tacky::UnaryOperator::Negate,
+            Self::Not => tacky::UnaryOperator::Not,
         }
     }
 }
 
 impl SyntaxBinaryOperator {
-    pub fn lower(self) -> ir::BinaryOperator {
+    pub fn lower(self) -> tacky::BinaryOperator {
         match self {
-            Self::Add => ir::BinaryOperator::Add,
-            Self::Subtract => ir::BinaryOperator::Subtract,
-            Self::Multiply => ir::BinaryOperator::Multiply,
-            Self::Divide => ir::BinaryOperator::Divide,
-            Self::Remainder => ir::BinaryOperator::Remainder,
-            Self::LeftShift => ir::BinaryOperator::LeftShift,
-            Self::RightShift => ir::BinaryOperator::RightShift,
-            Self::BitwiseAnd => ir::BinaryOperator::BitwiseAnd,
-            Self::BitwiseXor => ir::BinaryOperator::BitwiseXor,
-            Self::BitwiseOr => ir::BinaryOperator::BitwiseOr,
-            Self::NotEqual => ir::BinaryOperator::NotEqual,
-            Self::LessThan => ir::BinaryOperator::LessThan,
-            Self::LessEqual => ir::BinaryOperator::LessEqual,
-            Self::GreaterThan => ir::BinaryOperator::GreaterThan,
-            Self::GreaterEqual => ir::BinaryOperator::GreaterEqual,
-            Self::Equal => ir::BinaryOperator::Equal,
+            Self::Add => tacky::BinaryOperator::Add,
+            Self::Subtract => tacky::BinaryOperator::Subtract,
+            Self::Multiply => tacky::BinaryOperator::Multiply,
+            Self::Divide => tacky::BinaryOperator::Divide,
+            Self::Remainder => tacky::BinaryOperator::Remainder,
+            Self::LeftShift => tacky::BinaryOperator::LeftShift,
+            Self::RightShift => tacky::BinaryOperator::RightShift,
+            Self::BitwiseAnd => tacky::BinaryOperator::BitwiseAnd,
+            Self::BitwiseXor => tacky::BinaryOperator::BitwiseXor,
+            Self::BitwiseOr => tacky::BinaryOperator::BitwiseOr,
+            Self::NotEqual => tacky::BinaryOperator::NotEqual,
+            Self::LessThan => tacky::BinaryOperator::LessThan,
+            Self::LessEqual => tacky::BinaryOperator::LessEqual,
+            Self::GreaterThan => tacky::BinaryOperator::GreaterThan,
+            Self::GreaterEqual => tacky::BinaryOperator::GreaterEqual,
+            Self::Equal => tacky::BinaryOperator::Equal,
             Self::And
             | Self::Or
             | Self::Assign

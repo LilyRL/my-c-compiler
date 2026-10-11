@@ -1,3 +1,5 @@
+- i assume the book wont implement u8/i8/u16/i16/usize/isize
+- book isnt implementing f32
 - function pointers (not in book)
 - type definitions (not in book), will be easy once we change grammar to be less awful
 - Constants can refer to other constants
@@ -10,10 +12,18 @@
 - define operators like in haskell
 - macros. but simpler than that. maybe they can just take arguments like a function, if you want them to. or of course source code. and emit with an emit keyword?
 - like how zig handles structs and stuff. really cool
+  - like having .{ .test = blah } for structs and .foo for enum variants
 - logical integer type names
 - disambiguate grammar
   - fn foo(bar: Baz) -> Baz;
   - let x: i32 = 0;
   - replace static/extern with pub priv in global scope
+- add a flag to error instead of implicitly converting types
+- runtime safety checks for type conversions and array accesses
+  - float -> int conversion can fail and we should raise some kind of exception
+  - array bounds checking
+  - with a flag to turn it off
+- utilise AVX instructions if availible
+  - e.g. for converting from floats -> unsigned integers
 - approximately equal operator
 - logical xor

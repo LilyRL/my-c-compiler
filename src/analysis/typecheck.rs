@@ -334,6 +334,14 @@ fn check_expression(
         } => {
             check_expression(inner, symbols, diagnostics)?;
 
+            if inner.ty.is_floating_point() && operator.is_bitwise_not() {
+                diagnostics.analysis_error(
+                    expr.span.clone(),
+                    "bitwise not cannot be applied to floating point numbers",
+                );
+                return None;
+            }
+
             expr.ty = match operator {
                 UnaryOperator::Not => Type::Int,
                 _ => inner.ty.clone(),
@@ -455,7 +463,11 @@ fn get_common_type(a: Type, b: Type) -> Type {
     if a == b {
         a
     } else if a.size_bytes() == b.size_bytes() {
-        if a.is_signed() { b } else { a }
+        if a.is_signed_int() { b } else { a }
+    } else if a == Type::Double || b == Type::Double {
+        Type::Double
+    } else if a == Type::Float || b == Type::Float {
+        Type::Float
     } else {
         if a.size_bytes() > b.size_bytes() {
             a

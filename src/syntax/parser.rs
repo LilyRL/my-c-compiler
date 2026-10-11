@@ -41,7 +41,7 @@ impl Parser {
         Some(Program(declarations))
     }
 
-    fn error(&mut self, span: Span, message: impl Into<String>) {
+    fn error(&mut self, span: Span, message: impl ToString) {
         self.errors
             .push(Diagnostic::new(Stage::Parse, span, message));
     }
@@ -579,6 +579,28 @@ impl Parser {
                 let expr = Expression::new(ExprKind::Constant(constant), span);
                 self.postfix(expr)
             }
+            Token::InfDouble => {
+                let span = self.current_spanned()?.span.clone();
+                let expr =
+                    Expression::new(ExprKind::Constant(Constant::Double(f64::INFINITY)), span);
+                self.postfix(expr)
+            }
+            Token::InfFloat => {
+                let span = self.current_spanned()?.span.clone();
+                let expr =
+                    Expression::new(ExprKind::Constant(Constant::Float(f32::INFINITY)), span);
+                self.postfix(expr)
+            }
+            Token::NanDouble => {
+                let span = self.current_spanned()?.span.clone();
+                let expr = Expression::new(ExprKind::Constant(Constant::Double(f64::NAN)), span);
+                self.postfix(expr)
+            }
+            Token::NanFloat => {
+                let span = self.current_spanned()?.span.clone();
+                let expr = Expression::new(ExprKind::Constant(Constant::Float(f32::NAN)), span);
+                self.postfix(expr)
+            }
             Token::Hyphen => {
                 let start = self.current_spanned()?.span.start;
                 self.unary(UnaryOperator::Negate, start)
@@ -681,6 +703,20 @@ impl Parser {
             return None;
         }
 
+        for (specifier, ty, name) in [
+            (Specifier::Double, Type::Double, "double"),
+            (Specifier::Float, Type::Float, "float"),
+        ] {
+            if list == &[specifier] {
+                return Some(ty);
+            } else if list.contains(&specifier) {
+                self.error(
+                    self.peek_span_or_eof(),
+                    format!("'{name}' cannot be combined with other type specifiers"),
+                );
+            }
+        }
+
         if list.contains(&&Specifier::Signed) && list.contains(&&Specifier::Unsigned) {
             self.error(
                 self.peek_span_or_eof(),
@@ -702,7 +738,7 @@ impl Parser {
 
     fn type_(&mut self) -> Option<Type> {
         match self.peek() {
-            Some(Token::Int) | Some(Token::Long) | Some(Token::Signed) | Some(Token::Unsigned) => {
+            a if a.is_some_and(|t| t.is_specifier()) => {
                 let mut type_specifiers = vec![];
                 while let Some(specifier) = self.peek().and_then(|s| s.specifier()) {
                     type_specifiers.push(specifier);
@@ -737,6 +773,8 @@ impl Parser {
                 Specifier::Long => types.push(*specifier),
                 Specifier::Signed => types.push(*specifier),
                 Specifier::Unsigned => types.push(*specifier),
+                Specifier::Float => types.push(*specifier),
+                Specifier::Double => types.push(*specifier),
                 Specifier::Extern => storage_classes.push(specifier),
                 Specifier::Static => storage_classes.push(specifier),
             }

@@ -67,12 +67,22 @@ pub enum InitialValue {
     None,
 }
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, Copy, PartialEq, PartialOrd)]
 pub enum StaticInit {
     Int(i32),
     UInt(u32),
     Long(i64),
     ULong(u64),
+    Float(f32),
+    Double(f64),
+}
+
+impl Eq for StaticInit {}
+
+impl Ord for StaticInit {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.bits().cmp(&other.bits())
+    }
 }
 
 impl StaticInit {
@@ -82,6 +92,8 @@ impl StaticInit {
             StaticInit::Long(_) => 8,
             StaticInit::UInt(_) => 4,
             StaticInit::ULong(_) => 8,
+            StaticInit::Float(_) => 4,
+            StaticInit::Double(_) => 8,
         }
     }
 
@@ -91,11 +103,28 @@ impl StaticInit {
             StaticInit::Long(l) => *l == 0,
             StaticInit::UInt(u) => *u == 0,
             StaticInit::ULong(ul) => *ul == 0,
+            StaticInit::Float(f) => *f == 0.0,
+            StaticInit::Double(d) => *d == 0.0,
         }
+    }
+
+    pub fn is_float(&self) -> bool {
+        matches!(self, StaticInit::Float(_) | StaticInit::Double(_))
     }
 
     pub fn cast(self, ty: ConstantType) -> Self {
         self.to_constant().cast(ty).to_static_init()
+    }
+
+    pub fn bits(&self) -> u64 {
+        match self {
+            StaticInit::Int(i) => *i as u64,
+            StaticInit::Long(l) => *l as u64,
+            StaticInit::UInt(u) => *u as u64,
+            StaticInit::ULong(ul) => *ul,
+            StaticInit::Float(f) => f.to_bits() as u64,
+            StaticInit::Double(d) => d.to_bits(),
+        }
     }
 
     pub fn from_constant(constant: Constant) -> Self {
@@ -108,6 +137,8 @@ impl StaticInit {
             StaticInit::UInt(u) => Constant::UInt(u),
             StaticInit::Long(l) => Constant::Long(l),
             StaticInit::ULong(ul) => Constant::ULong(ul),
+            StaticInit::Float(f) => Constant::Float(f),
+            StaticInit::Double(d) => Constant::Double(d),
         }
     }
 }

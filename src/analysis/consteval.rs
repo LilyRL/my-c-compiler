@@ -49,6 +49,16 @@ impl ConstExpr {
                         UnaryOperator::Not => Ok(Constant::Int(!(n != 0) as i32)),
                         UnaryOperator::Negate => Err("cannot negate unsigned long"),
                     },
+                    Constant::Float(f) => match operator {
+                        UnaryOperator::BitwiseNot => Err("cannot bitwise not float"),
+                        UnaryOperator::Not => Ok(Constant::Int(!(f != 0.0) as i32)),
+                        UnaryOperator::Negate => Ok(Constant::Float(-f)),
+                    },
+                    Constant::Double(d) => match operator {
+                        UnaryOperator::BitwiseNot => Err("cannot bitwise not double"),
+                        UnaryOperator::Not => Ok(Constant::Int(!(d != 0.0) as i32)),
+                        UnaryOperator::Negate => Ok(Constant::Double(-d)),
+                    },
                 }
             }
             Self::Cast { target_type, expr } => Ok(expr.eval()?.cast(target_type)),
@@ -119,6 +129,72 @@ impl ConstExpr {
                         | BinaryOperator::LeftShiftAssign
                         | BinaryOperator::RightShiftAssign => unreachable!(),
                     },
+                    (Constant::Float(f), Constant::Float(g)) => match operator {
+                        BinaryOperator::Add => Constant::Float(f + g),
+                        BinaryOperator::Subtract => Constant::Float(f - g),
+                        BinaryOperator::Multiply => Constant::Float(f * g),
+                        BinaryOperator::Divide => Constant::Float(f / g),
+                        BinaryOperator::Remainder => Constant::Float(f % g),
+                        BinaryOperator::Equal => Constant::Int((f == g) as i32),
+                        BinaryOperator::NotEqual => Constant::Int((f != g) as i32),
+                        BinaryOperator::LessThan => Constant::Int((f < g) as i32),
+                        BinaryOperator::LessEqual => Constant::Int((f <= g) as i32),
+                        BinaryOperator::GreaterThan => Constant::Int((f > g) as i32),
+                        BinaryOperator::GreaterEqual => Constant::Int((f >= g) as i32),
+                        BinaryOperator::BitwiseAnd
+                        | BinaryOperator::BitwiseXor
+                        | BinaryOperator::BitwiseOr
+                        | BinaryOperator::LeftShift
+                        | BinaryOperator::RightShift
+                        | BinaryOperator::And
+                        | BinaryOperator::Or => {
+                            return Err("invalid operator for float");
+                        }
+                        BinaryOperator::Assign
+                        | BinaryOperator::AddAssign
+                        | BinaryOperator::SubtractAssign
+                        | BinaryOperator::MultiplyAssign
+                        | BinaryOperator::DivideAssign
+                        | BinaryOperator::RemainderAssign
+                        | BinaryOperator::BitwiseAndAssign
+                        | BinaryOperator::BitwiseXorAssign
+                        | BinaryOperator::BitwiseOrAssign
+                        | BinaryOperator::LeftShiftAssign
+                        | BinaryOperator::RightShiftAssign => unreachable!(),
+                    },
+                    (Constant::Double(f), Constant::Double(g)) => match operator {
+                        BinaryOperator::Add => Constant::Double(f + g),
+                        BinaryOperator::Subtract => Constant::Double(f - g),
+                        BinaryOperator::Multiply => Constant::Double(f * g),
+                        BinaryOperator::Divide => Constant::Double(f / g),
+                        BinaryOperator::Remainder => Constant::Double(f % g),
+                        BinaryOperator::Equal => Constant::Int((f == g) as i32),
+                        BinaryOperator::NotEqual => Constant::Int((f != g) as i32),
+                        BinaryOperator::LessThan => Constant::Int((f < g) as i32),
+                        BinaryOperator::LessEqual => Constant::Int((f <= g) as i32),
+                        BinaryOperator::GreaterThan => Constant::Int((f > g) as i32),
+                        BinaryOperator::GreaterEqual => Constant::Int((f >= g) as i32),
+                        BinaryOperator::BitwiseAnd
+                        | BinaryOperator::BitwiseXor
+                        | BinaryOperator::BitwiseOr
+                        | BinaryOperator::LeftShift
+                        | BinaryOperator::RightShift
+                        | BinaryOperator::And
+                        | BinaryOperator::Or => {
+                            return Err("invalid operator for float");
+                        }
+                        BinaryOperator::Assign
+                        | BinaryOperator::AddAssign
+                        | BinaryOperator::SubtractAssign
+                        | BinaryOperator::MultiplyAssign
+                        | BinaryOperator::DivideAssign
+                        | BinaryOperator::RemainderAssign
+                        | BinaryOperator::BitwiseAndAssign
+                        | BinaryOperator::BitwiseXorAssign
+                        | BinaryOperator::BitwiseOrAssign
+                        | BinaryOperator::LeftShiftAssign
+                        | BinaryOperator::RightShiftAssign => unreachable!(),
+                    },
                     _ => unreachable!(),
                 })
             }
@@ -151,13 +227,10 @@ impl Expression {
             ExprKind::Constant(c) => Some(ConstExpr::Constant(*c)),
             ExprKind::Cast { target_type, expr } => {
                 let expr = expr.to_constant()?;
-                let ty = match target_type {
-                    Type::Int => ConstantType::Int,
-                    Type::Long => ConstantType::Long,
-                    Type::UInt => ConstantType::UInt,
-                    Type::ULong => ConstantType::ULong,
-                    Type::Function(_) => return Err("non-constant expression"),
+                let Some(ty) = target_type.to_constant() else {
+                    return Err("non-constant expression");
                 };
+
                 Some(ConstExpr::Cast {
                     target_type: ty,
                     expr: Box::new(expr),

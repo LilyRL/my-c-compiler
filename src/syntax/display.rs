@@ -12,6 +12,8 @@ impl Display for Expression {
                 Constant::Long(l) => write!(f, "{}", l),
                 Constant::UInt(u) => write!(f, "{}", u),
                 Constant::ULong(ul) => write!(f, "{}", ul),
+                Constant::Float(fl) => write!(f, "{}", fl),
+                Constant::Double(d) => write!(f, "{}", d),
             },
             ExprKind::Unary { operator, expr } => write!(f, "({} {})", operator.symbol(), expr),
             ExprKind::Binary { operator, lhs, rhs } => {

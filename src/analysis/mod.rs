@@ -1,5 +1,6 @@
 use crate::{
     analysis::{
+        collapsing::collapse_constant_expressions,
         functions::{add_return_zero, check_for_nested_functions},
         goto::{check_if_all_gotos_point_somewhere_valid, rename_all_gotos},
         typecheck::check_all_types,
@@ -13,6 +14,7 @@ use declarations::resolve_all_identifiers;
 use loops::label_all_loops;
 use switch::collect_all_switch_cases;
 
+mod collapsing;
 mod consteval;
 mod declarations;
 mod functions;
@@ -22,6 +24,7 @@ mod switch;
 mod typecheck;
 
 pub fn validate_program(program: &mut Program, diagnostics: &mut Diagnostics) -> Option<Symbols> {
+    collapse_constant_expressions(program);
     add_return_zero(program);
     replace_compound_assign_with_assign_binary(program);
     resolve_all_identifiers(program, diagnostics);

@@ -10,6 +10,8 @@ pub static KEYWORDS: Map<&'static str, &[Token]> = phf_map! {
     "int" => &[Int],
     "long" => &[Long],
     "void" => &[Void],
+    "float" => &[Float],
+    "double" => &[Double],
     "signed" => &[Signed],
     "unsigned" => &[Unsigned],
     "return" => &[Return],
@@ -26,6 +28,10 @@ pub static KEYWORDS: Map<&'static str, &[Token]> = phf_map! {
     "continue" => &[Continue],
     "static" => &[Static],
     "extern" => &[Extern],
+    "Inf_double" => &[InfDouble],
+    "Inf_float" => &[InfFloat],
+    "NaN_double" => &[NanDouble],
+    "NaN_float" => &[NanFloat],
 };
 
 pub static TWO_CHAR_OPS: Map<&'static str, Token> = phf_map! {

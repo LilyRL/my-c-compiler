@@ -44,3 +44,26 @@ int print_long(long n) {
 
   return 0;
 }
+
+int print_double(double n) {
+  if (n < 0) {
+    putchar(45);
+    n = -n;
+  }
+
+  long int_part = (long)n;
+  double frac_part = n - int_part;
+
+  print_long(int_part);
+  putchar(46); // decimal point
+
+  // Print fractional part with a fixed number of digits (e.g., 6)
+  for (int i = 0; i < 6; i++) {
+    frac_part *= 10;
+    int digit = (int)frac_part;
+    put_digit(digit);
+    frac_part -= digit;
+  }
+
+  return 0;
+}

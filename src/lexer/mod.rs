@@ -7,6 +7,7 @@ use crate::{
     diagnostics::{Diagnostic, Stage},
 };
 
+mod float;
 mod hash;
 
 #[derive(Debug, PartialEq, Copy, Clone, EnumIs)]
@@ -74,6 +75,12 @@ pub enum Token {
     Static,
     Extern,
     EndOfInput,
+    Double,
+    Float,
+    InfDouble,
+    InfFloat,
+    NanDouble,
+    NanFloat,
 }
 
 #[derive(Debug)]
@@ -107,6 +114,14 @@ impl<'a> Lexer<'a> {
 
     fn peek(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
+    }
+
+    fn current(&self) -> u8 {
+        self.bytes[self.pos]
+    }
+
+    fn double_peek(&self) -> Option<u8> {
+        self.bytes.get(self.pos + 1).copied()
     }
 
     fn bump(&mut self) -> Option<u8> {
@@ -167,17 +182,18 @@ impl<'a> Lexer<'a> {
             return true;
         };
 
-        if c.is_ascii_alphabetic() || c == b'_' {
-            self.lex_ident_or_keyword(start);
-            return false;
+        match c {
+            c if c.is_ascii_alphabetic() || c == b'_' => {
+                self.lex_ident_or_keyword(start);
+            }
+            c if c.is_ascii_digit() => {
+                self.lex_number(start);
+            }
+            b'.' if self.double_peek().is_some_and(|c| c.is_ascii_digit()) => {
+                self.lex_number(start)
+            }
+            _ => self.lex_operator(start),
         }
-
-        if c.is_ascii_digit() {
-            self.lex_number(start);
-            return false;
-        }
-
-        self.lex_operator(start);
 
         false
     }
@@ -199,24 +215,53 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_number(&mut self, start: usize) {
+        let mut is_float = false;
+
         while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
             self.pos += 1;
         }
-        let digits_end = self.pos;
+
+        if matches!(self.peek(), Some(c) if c == b'.') {
+            is_float = true;
+            self.pos += 1;
+        }
+
+        while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+            self.pos += 1;
+        }
+
+        if matches!(self.peek(), Some(c) if c == b'e' || c == b'E') {
+            is_float = true;
+            self.pos += 1;
+        }
+
+        if matches!(self.peek(), Some(c) if c == b'-') {
+            is_float = true;
+            self.pos += 1;
+        }
+
+        while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
+            self.pos += 1;
+        }
 
         let suffix_start = self.pos;
-        while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == b'_') {
+        // also consuming '.' here catches 0.5.2 otherwise being parsed as [0.5, 0.2], and instead gives an invalid
+        // suffix error, which is what clang does
+        while matches!(self.peek(), Some(c) if c.is_ascii_alphanumeric() || c == b'_' || c == b'.')
+        {
             self.pos += 1;
         }
 
         let span = start..self.pos;
         let text = &self.source[span.clone()];
 
-        // TODO: hex and octal and binary support arent done yet. i'll wait to see if they come up in the book first
-        let constant = match classify_integer(
-            &self.source[start..digits_end],
+        // TODO: hex and octal and binary support
+        let digits = &self.source[start..suffix_start];
+        let candidate_types = match classify_number(
+            &self.source[start..suffix_start],
             &self.source[suffix_start..self.pos],
             true,
+            is_float,
         ) {
             Ok(constant) => constant,
             Err(e) => {
@@ -226,10 +271,47 @@ impl<'a> Lexer<'a> {
             }
         };
 
-        self.push(SpannedToken {
-            token: Token::Literal(constant),
-            span,
-        });
+        if is_float {
+            self.lex_float(start, candidate_types[0]);
+        } else {
+            self.lex_integer(digits, candidate_types);
+        }
+    }
+
+    fn lex_integer(&mut self, digits: &str, candidates: &[ConstantType]) {
+        // u128 can fit any valid digits for any type, since the negative numbers dont exist at lexing and only at the parsing stage
+        let Ok(magnitude) = digits.parse::<u128>() else {
+            self.diagnostics.push(Diagnostic::new(
+                Stage::Lex,
+                self.pos - digits.len()..self.pos,
+                format!("integer literal '{digits}' is too large"),
+            ));
+            return;
+        };
+
+        for candidate in candidates {
+            if magnitude <= max_value(*candidate) {
+                let constant = match candidate {
+                    ConstantType::Int => Constant::Int(magnitude as i32),
+                    ConstantType::UInt => Constant::UInt(magnitude as u32),
+                    ConstantType::Long => Constant::Long(magnitude as i64),
+                    ConstantType::ULong => Constant::ULong(magnitude as u64),
+                    _ => unreachable!(),
+                };
+
+                self.push(SpannedToken {
+                    token: Token::Literal(constant),
+                    span: self.pos - digits.len()..self.pos,
+                });
+                return;
+            }
+        }
+
+        self.diagnostics.push(Diagnostic::new(
+            Stage::Lex,
+            self.pos - digits.len()..self.pos,
+            format!("integer literal '{digits}' is too large for any type"),
+        ));
     }
 
     fn lex_operator(&mut self, start: usize) {
@@ -312,7 +394,12 @@ impl Token {
     pub fn is_type(self) -> bool {
         matches!(
             self,
-            Token::Int | Token::Long | Token::Unsigned | Token::Signed
+            Token::Int
+                | Token::Long
+                | Token::Unsigned
+                | Token::Signed
+                | Token::Float
+                | Token::Double
         )
     }
 
@@ -324,6 +411,8 @@ impl Token {
             Token::Unsigned => Some(Specifier::Unsigned),
             Token::Static => Some(Specifier::Static),
             Token::Extern => Some(Specifier::Extern),
+            Token::Float => Some(Specifier::Float),
+            Token::Double => Some(Specifier::Double),
             _ => None,
         }
     }
@@ -337,6 +426,8 @@ impl Display for Token {
                 Constant::Long(_) => "literal_long",
                 Constant::UInt(_) => "literal_unsigned_int",
                 Constant::ULong(_) => "literal_unsigned_long",
+                Constant::Float(_) => "literal_float",
+                Constant::Double(_) => "literal_double",
             },
             Token::Ident => "identifier",
             Token::Int => "int",
@@ -344,6 +435,8 @@ impl Display for Token {
             Token::Void => "void",
             Token::Signed => "signed",
             Token::Unsigned => "unsigned",
+            Token::Double => "double",
+            Token::Float => "float",
             Token::Return => "return",
             Token::OpenParen => "(",
             Token::CloseParen => ")",
@@ -400,47 +493,79 @@ impl Display for Token {
             Token::Comma => ",",
             Token::Static => "static",
             Token::Extern => "extern",
+            Token::NanDouble => "nan_double",
+            Token::NanFloat => "nan_float",
+            Token::InfDouble => "inf_double",
+            Token::InfFloat => "inf_float",
         };
         write!(f, "{}", s)
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum IntSuffix {
+enum NumSuffix {
     None,
     Long,
     Unsigned,
     UnsignedLong,
+    Float,
+    Double,
 }
 
-impl IntSuffix {
-    fn parse(suffix: &str) -> Result<Self, IntLiteralError> {
-        let mut has_l = false;
-        let mut has_u = false;
-        for c in suffix.chars() {
-            match c.to_ascii_lowercase() {
-                'l' if !has_l => has_l = true,
-                'u' if !has_u => has_u = true,
-                _ => return Err(IntLiteralError::BadSuffix(suffix.to_string())),
+impl NumSuffix {
+    fn parse(suffix: &str) -> Result<Self, NumLiteralError> {
+        match suffix {
+            // rust like
+            "u32" => return Ok(NumSuffix::Unsigned),
+            "u64" => return Ok(NumSuffix::UnsignedLong),
+            "i32" => return Ok(NumSuffix::None),
+            "i64" => return Ok(NumSuffix::Long),
+            "f32" => return Ok(NumSuffix::Float),
+            "f64" => return Ok(NumSuffix::Double),
+            // c like (probably will remove once done)
+            _ => {
+                let mut has_l = false;
+                let mut has_u = false;
+                for c in suffix.chars() {
+                    match c.to_ascii_lowercase() {
+                        'l' if !has_l => has_l = true,
+                        'u' if !has_u => has_u = true,
+                        _ => return Err(NumLiteralError::BadSuffix(suffix.to_string())),
+                    }
+                }
+                Ok(match (has_l, has_u) {
+                    (false, false) => NumSuffix::None,
+                    (true, false) => NumSuffix::Long,
+                    (false, true) => NumSuffix::Unsigned,
+                    (true, true) => NumSuffix::UnsignedLong,
+                })
             }
         }
-        Ok(match (has_l, has_u) {
-            (false, false) => IntSuffix::None,
-            (true, false) => IntSuffix::Long,
-            (false, true) => IntSuffix::Unsigned,
-            (true, true) => IntSuffix::UnsignedLong,
-        })
     }
 }
 
-fn constant_type_candidates(suffix: IntSuffix, decimal: bool) -> &'static [ConstantType] {
+fn constant_type_candidates(
+    suffix: NumSuffix,
+    decimal: bool,
+    fractional: bool,
+) -> Result<&'static [ConstantType], NumLiteralError> {
     use ConstantType::*;
-    match (suffix, decimal) {
-        (IntSuffix::None, true) => &[Int, Long],
-        (IntSuffix::None, false) => &[Int, UInt, Long, ULong],
-        (IntSuffix::Unsigned, _) => &[UInt, ULong],
-        (IntSuffix::Long, _) => &[Long],
-        (IntSuffix::UnsignedLong, _) => &[ULong],
+
+    if fractional {
+        match suffix {
+            NumSuffix::Float => Ok(&[Float]),
+            NumSuffix::None | NumSuffix::Double => Ok(&[Double]),
+            _ => Err(NumLiteralError::InvalidFloatSuffix),
+        }
+    } else {
+        match (suffix, decimal) {
+            (NumSuffix::None, true) => Ok(&[Int, Long]),
+            (NumSuffix::None, false) => Ok(&[Int, UInt, Long, ULong]),
+            (NumSuffix::Unsigned, _) => Ok(&[UInt, ULong]),
+            (NumSuffix::Long, _) => Ok(&[Long]),
+            (NumSuffix::UnsignedLong, _) => Ok(&[ULong]),
+            (NumSuffix::Float | NumSuffix::Double, _) => Err(NumLiteralError::InvalidIntSuffix),
+        }
     }
 }
 
@@ -450,44 +575,37 @@ const fn max_value(ty: ConstantType) -> u128 {
         ConstantType::UInt => u32::MAX as u128,
         ConstantType::Long => i64::MAX as u128,
         ConstantType::ULong => u64::MAX as u128,
+        ConstantType::Float | ConstantType::Double => unreachable!(),
     }
 }
 
 #[derive(Debug)]
-enum IntLiteralError {
+enum NumLiteralError {
     BadSuffix(String),
-    TooLarge,
+    InvalidFloatSuffix,
+    InvalidIntSuffix,
 }
 
-impl IntLiteralError {
+impl NumLiteralError {
     fn message(&self, literal: &str) -> String {
         match self {
             Self::BadSuffix(suffix) => {
-                format!("invalid suffix '{suffix}' on integer constant '{literal}'")
+                format!("invalid suffix '{suffix}' on constant '{literal}'")
             }
-            Self::TooLarge => {
-                format!("integer constant '{literal}' is too large for any integer type")
+            Self::InvalidFloatSuffix => {
+                format!("invalid suffix on floating point constant '{literal}'")
             }
+            Self::InvalidIntSuffix => format!("invalid suffix on integer constant '{literal}'"),
         }
     }
 }
 
-fn classify_integer(
+fn classify_number(
     digits: &str,
     suffix: &str,
     decimal: bool,
-) -> Result<Constant, IntLiteralError> {
-    let suffix = IntSuffix::parse(suffix)?;
-
-    // u128 holds anything that fits in any type we support, so a parse
-    // failure means the value is out of range for every candidate.
-    // remember that negatives are lexed as a minus sign and then a positive literal
-    let magnitude: u128 = digits.parse().map_err(|_| IntLiteralError::TooLarge)?;
-
-    constant_type_candidates(suffix, decimal)
-        .iter()
-        .copied()
-        .find(|&ty| magnitude <= max_value(ty))
-        .map(|ty| Constant::from_magnitude(magnitude, ty))
-        .ok_or(IntLiteralError::TooLarge)
+    fractional: bool,
+) -> Result<&'static [ConstantType], NumLiteralError> {
+    let suffix = NumSuffix::parse(suffix)?;
+    constant_type_candidates(suffix, decimal, fractional)
 }

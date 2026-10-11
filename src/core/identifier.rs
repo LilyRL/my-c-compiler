@@ -1,4 +1,4 @@
-use crate::target::{TargetOs, target_os};
+use crate::target::{BinaryFormat, target};
 use std::{
     fmt::Display,
     sync::atomic::{AtomicUsize, Ordering},
@@ -37,17 +37,18 @@ fn base62_encode(mut n: usize) -> String {
 }
 
 impl Identifier {
-    fn next() -> String {
+    pub fn next() -> String {
         let n = IDENT_COUNTER.load(Ordering::Relaxed);
         IDENT_COUNTER.fetch_add(1, Ordering::Relaxed);
 
         base62_encode(n)
     }
 
+    #[inline]
     pub fn new(name: impl Display) -> Self {
-        match target_os() {
-            TargetOs::Linux => Self(format!(".L_{name}.{}", Self::next()), name.to_string()),
-            TargetOs::MacOs => Self(format!("L_{name}.{}", Self::next()), name.to_string()),
+        match target().binary_format {
+            BinaryFormat::Elf => Self(format!(".L_{name}.{}", Self::next()), name.to_string()),
+            BinaryFormat::Mach => Self(format!("L_{name}.{}", Self::next()), name.to_string()),
         }
     }
 
@@ -56,9 +57,9 @@ impl Identifier {
     }
 
     pub fn local(&self) -> Self {
-        match target_os() {
-            TargetOs::Linux => Self(format!(".L_{}", self.0), self.1.clone()),
-            TargetOs::MacOs => Self(format!("L_{}", self.0), self.1.clone()),
+        match target().binary_format {
+            BinaryFormat::Elf => Self(format!(".L_{}", self.0), self.1.clone()),
+            BinaryFormat::Mach => Self(format!("L_{}", self.0), self.1.clone()),
         }
     }
 

@@ -13,7 +13,7 @@ use crate::{
     diagnostics::{Diagnostic, Diagnostics, report_all},
     lexer::lex,
     syntax::parse,
-    target::handle_target_os_arguement,
+    target::{Target, handle_binary_format_argument, handle_word_size_argument, set_target},
 };
 
 mod args;
@@ -23,7 +23,13 @@ type Res<T> = Result<T, Error>;
 
 pub fn run() -> Res<()> {
     let args = Args::parse();
-    handle_target_os_arguement(&args.target_os);
+
+    set_target(Target {
+        binary_format: handle_binary_format_argument(&args.binary_format),
+        word_size: handle_word_size_argument(&args.word_size),
+        use_avx: args.use_avx,
+        accurate_float_conversions: args.accurate_float_conversions,
+    });
 
     let paths = Paths::new(&args);
     let file_name = paths.input.to_string_lossy();
@@ -52,7 +58,10 @@ pub fn run() -> Res<()> {
         assemble_cmd.arg("-c");
     }
 
-    assemble_cmd.args(["-o"]).arg(&paths.output);
+    assemble_cmd
+        .args(["-o"])
+        .arg(&paths.output)
+        .args(args.link.iter().map(|p| format!("-l{p}")));
 
     let assemble_status = assemble_cmd.status()?;
 
@@ -113,16 +122,17 @@ fn compile_pipeline(
 
     let tacky_program = program.lower(&mut symbols);
     if args.tacky {
-        println!("{tacky_program}");
+        println!("{}", tacky_program.format(&symbols));
         return Ok(None);
     }
 
     if args.keep_intermediates {
-        let _ = fs::write(&paths.ir, format!("{tacky_program}"));
+        let _ = fs::write(&paths.ir, format!("{}", tacky_program.format(&symbols)));
         let _ = fs::write(&paths.ir_extra, format!("{:#?}", tacky_program));
     }
 
-    let mut asm_program = tacky_program.lower(&symbols);
+    let mut constants = std::collections::HashMap::new();
+    let mut asm_program = tacky_program.lower(&symbols, &mut constants);
     asm::transform(&mut asm_program, &symbols);
 
     if args.codegen {
@@ -131,7 +141,7 @@ fn compile_pipeline(
         return Ok(None);
     }
 
-    Ok(Some(asm_program.format(&symbols)))
+    Ok(Some(asm_program.format(&symbols, &constants)))
 }
 
 fn preprocess_source(paths: &Paths) -> Res<String> {

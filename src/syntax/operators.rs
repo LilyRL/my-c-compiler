@@ -1,3 +1,5 @@
+use strum::EnumIs;
+
 use crate::lexer::Token;
 
 pub const CONDITIONAL_PRECEDENCE: u32 = 10;
@@ -57,7 +59,7 @@ pub enum BinaryOperator {
     RightShiftAssign,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, EnumIs)]
 pub enum UnaryOperator {
     BitwiseNot,
     Negate,

@@ -54,7 +54,7 @@ impl Diagnostics {
         self.vec.push(diagnostic);
     }
 
-    pub fn add(&mut self, stage: Stage, span: Span, message: impl Into<String>) -> &mut Diagnostic {
+    pub fn add(&mut self, stage: Stage, span: Span, message: impl ToString) -> &mut Diagnostic {
         let diagnostic = Diagnostic::new(stage, span, message);
         self.vec.push(diagnostic);
         self.vec.last_mut().expect("just pushed")
@@ -81,10 +81,10 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
-    pub fn new(stage: Stage, span: Span, message: impl Into<String>) -> Self {
+    pub fn new(stage: Stage, span: Span, message: impl ToString) -> Self {
         Self {
             stage,
-            message: message.into(),
+            message: message.to_string(),
             labels: vec![Label {
                 span,
                 message: String::new(),

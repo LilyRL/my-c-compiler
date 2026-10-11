@@ -5,20 +5,28 @@ use crate::core::{Identifier, StaticInit};
 #[derive(Debug)]
 pub struct Program(pub Vec<TopLevel>);
 
-#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIs)]
 pub enum AssemblyType {
-    Longword = 32,
-    Quadword = 64,
+    Longword,
+    Quadword,
+    Single,
+    Double,
 }
 
 impl AssemblyType {
     pub fn size_bytes(self) -> u32 {
-        (self as u32) / 8
+        match self {
+            Self::Longword | Self::Single => 4,
+            Self::Quadword | Self::Double => 8,
+        }
     }
 
     pub fn alignment(self) -> i32 {
         self.size_bytes() as i32
+    }
+
+    pub(crate) fn is_float(&self) -> bool {
+        matches!(self, Self::Single | Self::Double)
     }
 }
 
@@ -26,6 +34,7 @@ impl AssemblyType {
 pub enum TopLevel {
     F(FunctionDefinition),
     V(StaticVariable),
+    C(StaticConstant),
 }
 
 #[derive(Debug)]
@@ -39,6 +48,13 @@ pub struct FunctionDefinition {
 pub struct StaticVariable {
     pub name: Identifier,
     pub global: bool,
+    pub init: StaticInit,
+    pub alignment: u32,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StaticConstant {
+    pub name: Identifier,
     pub init: StaticInit,
     pub alignment: u32,
 }
@@ -72,8 +88,11 @@ pub enum Instruction {
         dst: Operand,
     },
     ZeroOut(AssemblyType, Operand),
+    // cmp for integers, ucomis* for floats
     Cmp(AssemblyType, Operand, Operand),
+    // signed integers
     Idiv(AssemblyType, Operand),
+    // unsigned integers
     Div(AssemblyType, Operand),
     Cdq(AssemblyType),
     Jump(Identifier),
@@ -83,6 +102,18 @@ pub enum Instruction {
     Push(Operand),
     Call(Identifier),
     Comment(&'static str),
+    // either cvtt(ss|sd|si)2(ss|sd|si)(l|q) or a noop
+    Convert {
+        src: Operand,
+        src_type: AssemblyType,
+        dst: Operand,
+        dst_type: AssemblyType,
+    },
+    TruncateFloat {
+        ty: AssemblyType,
+        src: Operand,
+        dst: Operand,
+    },
     Ret,
 }
 
@@ -108,16 +139,26 @@ impl Instruction {
 
 #[derive(Debug, Clone, Copy)]
 pub enum CondCode {
-    Eq, // set when equal
-    Ne, // set when not equal
-    Gt, // set when signed & a > b
-    Ge, // set when signed & a >= b
-    Lt, // set when signed & a < b
-    Le, // set when signed & a <= b
-    A,  // set when unsigned & a > b
-    Ae, // set when unsigned & a >= b
-    B,  // set when unsigned & a < b
-    Be, // set when unsigned & a <= b
+    /// set when equal
+    Eq,
+    /// set when not equal
+    Ne,
+    /// set when signed & a > b
+    Gt,
+    /// set when signed & a >= b
+    Ge,
+    /// set when signed & a < b
+    Lt,
+    /// set when signed & a <= b
+    Le,
+    /// set when unsigned & a > b
+    A,
+    /// set when unsigned & a >= b
+    Ae,
+    /// set when unsigned & a < b
+    B,
+    /// set when unsigned & a <= b
+    Be,
 }
 
 impl CondCode {
@@ -137,7 +178,7 @@ impl CondCode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Register {
     Ax,
     Cx,
@@ -148,14 +189,35 @@ pub enum Register {
     R9,
     R10,
     R11,
+    R12,
+    R13,
+    R14,
+    R15,
+    Xmm0,
+    Xmm1,
+    Xmm2,
+    Xmm3,
+    Xmm4,
+    Xmm5,
+    Xmm6,
+    Xmm7,
+    Xmm8,
+    Xmm9,
+    Xmm10,
+    Xmm11,
+    Xmm12,
+    Xmm13,
+    Xmm14,
+    Xmm15,
     StackPointer,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumIs)]
 pub enum BinaryOperator {
     Add,
     Sub,
     Mul,
+    FloatDiv,
     Sar, // arithmetic shift, used for signed values
     Sal, // "
     Shr, // logical shift, used for unsigned values
@@ -177,8 +239,9 @@ pub enum UnaryOperator {
     Not,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
+    // floating point numbers cannot be used as immidiate values
     Imm(i64),
     Reg(Register),
     Pseudo(Identifier),
@@ -186,8 +249,33 @@ pub enum Operand {
     Data(String),
 }
 
+impl Register {
+    /// the number in the name of a xmm register, if this is one
+    pub fn xmm_number(&self) -> Option<u8> {
+        Some(match self {
+            Self::Xmm0 => 0,
+            Self::Xmm1 => 1,
+            Self::Xmm2 => 2,
+            Self::Xmm3 => 3,
+            Self::Xmm4 => 4,
+            Self::Xmm5 => 5,
+            Self::Xmm6 => 6,
+            Self::Xmm7 => 7,
+            Self::Xmm8 => 8,
+            Self::Xmm9 => 9,
+            Self::Xmm10 => 10,
+            Self::Xmm11 => 11,
+            Self::Xmm12 => 12,
+            Self::Xmm13 => 13,
+            Self::Xmm14 => 14,
+            Self::Xmm15 => 15,
+            _ => return None,
+        })
+    }
+}
+
 impl BinaryOperator {
-    pub fn op_str(&self) -> &'static str {
+    pub fn int_op_str(&self) -> &'static str {
         match self {
             Self::Add => "add",
             Self::Sub => "sub",
@@ -203,7 +291,18 @@ impl BinaryOperator {
             | Self::GreaterThan
             | Self::GreaterEqual
             | Self::LessThan
-            | Self::LessEqual => unimplemented!(),
+            | Self::LessEqual
+            | Self::FloatDiv => unimplemented!(),
+        }
+    }
+
+    pub fn float_op_str(&self) -> Option<&'static str> {
+        match self {
+            Self::Add => Some("add"),
+            Self::Sub => Some("sub"),
+            Self::Mul => Some("mul"),
+            Self::FloatDiv => Some("div"),
+            _ => None,
         }
     }
 

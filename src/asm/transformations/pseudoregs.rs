@@ -4,7 +4,7 @@ use crate::asm::align_to;
 use crate::{
     asm::{FunctionDefinition, Instruction, Operand},
     core::Symbols,
-    target::target_os,
+    target::target,
 };
 
 pub fn replace_pseudoregisters(function: &mut FunctionDefinition, symbols: &Symbols) -> u32 {
@@ -19,7 +19,7 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition, symbols: &Symb
                 && data.attributes.is_static()
             {
                 let global = data.attributes.global();
-                *operand = Operand::Data(target_os().decorate_symbol(&ident.0, global));
+                *operand = Operand::Data(target().decorate_symbol(&ident.0, global));
             } else {
                 let ty = symbols
                     .get(ident)
@@ -42,6 +42,8 @@ pub fn replace_pseudoregisters(function: &mut FunctionDefinition, symbols: &Symb
             | Instruction::Movsx { src, dst }
             | Instruction::Movzx { src, dst }
             | Instruction::Binary { src, dst, .. }
+            | Instruction::Convert { src, dst, .. }
+            | Instruction::TruncateFloat { src, dst, .. }
             | Instruction::Cmp(_, src, dst) => {
                 process_operand(src);
                 process_operand(dst);

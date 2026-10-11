@@ -1,3 +1,5 @@
+#![warn(clippy::all, clippy::pedantic, clippy::nursery, clippy::cargo)]
+
 use std::process::ExitCode;
 
 mod analysis;
@@ -5,7 +7,7 @@ mod asm;
 mod core;
 mod diagnostics;
 mod harness;
-mod ir;
+mod tacky;
 mod lexer;
 mod syntax;
 mod target;
