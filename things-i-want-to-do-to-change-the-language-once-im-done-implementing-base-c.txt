@@ -23,6 +23,7 @@
   - float -> int conversion can fail and we should raise some kind of exception
   - array bounds checking
   - with a flag to turn it off
+  - initialise uninitiated variables to 0
 - utilise AVX instructions if availible
   - e.g. for converting from floats -> unsigned integers
 - approximately equal operator
