@@ -125,7 +125,13 @@ impl Display for StaticVariable {
 
 impl FunctionDefinition {
     fn format(&self, symbols: &Symbols) -> String {
-        let mut result = format!("fn {}() {{\n", self.name.0);
+        let params_str = self
+            .params
+            .iter()
+            .map(|param| format!("{} {}", param.ty, param.name.0))
+            .collect::<Vec<String>>()
+            .join(", ");
+        let mut result = format!("fn {}({}) {{\n", self.name.0, params_str);
         for instruction in &self.body {
             result.push_str(&format!("{}\n", instruction.format(symbols)));
         }
